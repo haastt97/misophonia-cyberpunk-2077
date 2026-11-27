@@ -48,7 +48,14 @@ public abstract class Catalog {
     ArrayPush(result, entry);
     entry.section = n"allBody";
     entry.setting = n"breathing";
-    entry.events = [n"cmn_generic_female_breathing_shivering", n"cmn_generic_female_breathing_stressed", n"cmn_generic_female_drugged_breathing_sick", n"cmn_generic_female_exhale", n"cmn_generic_female_inhale", n"cmn_generic_female_sleep_exhale", n"cmn_generic_female_sleep_inhale", n"cmn_generic_kid_breath_playful", n"cmn_generic_male_breathing_stressed", n"cmn_generic_male_drugged_breathing_sick", n"cmn_generic_male_exhale", n"cmn_generic_male_inhale", n"cmn_generic_male_meditation_exhale", n"cmn_generic_male_meditation_inhale", n"cmn_generic_man_cold_exhale", n"cmn_generic_woman_cold_exhale"];
+    entry.events = [n"cmn_generic_female_breathing_shivering", n"cmn_generic_female_breathing_stressed", n"cmn_generic_female_drugged_breathing_sick", n"cmn_generic_female_exhale", n"cmn_generic_female_inhale", n"cmn_generic_female_sleep_exhale", n"cmn_generic_female_sleep_inhale", n"cmn_generic_kid_breath_playful", n"cmn_generic_male_breathing_stressed", n"cmn_generic_male_drugged_breathing_sick", n"cmn_generic_male_exhale", n"cmn_generic_male_inhale", n"cmn_generic_male_meditation_exhale", n"cmn_generic_male_meditation_inhale", n"cmn_generic_man_cold_exhale", n"cmn_generic_woman_cold_exhale", n"q005_sc_09_jackie_breath_fast_loop", n"q005_sc_09_jackie_breath_slow_loop"];
+    ArrayPush(result, entry);
+    entry.section = n"allBody";
+    entry.setting = n"player_breathing";
+    entry.events = [
+      n"lcm_breathing",
+      n"lcm_breathing_stamina"
+    ];
     ArrayPush(result, entry);
     entry.section = n"allBody";
     entry.setting = n"snoring";
@@ -80,7 +87,7 @@ public abstract class Catalog {
     ArrayPush(result, entry);
     entry.section = n"allBody";
     entry.setting = n"retching";
-    entry.events = [n"amb_q307_cabride_comm_tunnel_vomiting", n"cmn_generic_female_vomit", n"cmn_generic_male_drugged_pre_vomit", n"cmn_generic_male_vomit", n"q000_corpo_sc_01_v_fem_vomits", n"q000_corpo_sc_01_v_male_vomits", n"sq031_sc_01_v_vo_vomit", n"sq031_sc_01d_v_vomit"];
+    entry.events = [n"amb_q307_cabride_comm_tunnel_vomiting", n"cmn_generic_female_vomit", n"cmn_generic_male_drugged_pre_vomit", n"cmn_generic_male_vomit", n"q000_corpo_sc_01_v_fem_vomits", n"q000_corpo_sc_01_v_male_vomits", n"sq031_sc_01_v_vo_vomit", n"sq031_sc_01d_v_vomit", n"sq032_sc_04_v_pukes"];
     ArrayPush(result, entry);
     entry.section = n"allBody";
     entry.setting = n"joints";
@@ -158,8 +165,32 @@ public abstract class Catalog {
     entry.events = [n"amb_g_city_el_animals_01_cat_meow_01", n"amb_g_city_el_animals_01_cat_purr_01", n"anm_cat_growl", n"anm_cat_hiss", n"anm_cat_purring_start", n"anm_cat_scream"];
     ArrayPush(result, entry);
     entry.section = n"allEnvironmental";
+    entry.setting = n"mud_movement";
+    entry.events = [
+      n"q101_sc_01_v_mud",
+      n"q101_sc_01_v_cralws",
+      n"q101_sc_01_v_falls_mud_01",
+      n"q101_sc_01_v_falls_mud_02"
+    ];
+    ArrayPush(result, entry);
+    entry.section = n"allEnvironmental";
     entry.setting = n"birds";
     entry.events = [n"amb_q113_arasaka_tower_jungle_bird_rnd_01", n"amb_q113_arasaka_tower_yorinobu_corridor_bird", n"amb_q307_hospital_outside_bird_01", n"amb_q307_hospital_outside_bird_02", n"amb_q_sts_ep1_08_bird_calm"];
+    ArrayPush(result, entry);
+    entry.section = n"allVoice";
+    entry.setting = n"ambient_phone_calls";
+    entry.events = [
+      n"ono_generic_f_phone_set_01",
+      n"ono_generic_f_phone_set_02",
+      n"ono_generic_f_phone_set_03",
+      n"ono_generic_f_phone_set_04",
+      n"ono_generic_m_phone_set_01",
+      n"ono_generic_m_phone_set_02",
+      n"ono_generic_m_phone_set_03",
+      n"ono_generic_m_phone_set_04",
+      n"ono_generic_m_phone_set_05",
+      n"ow_metro_ono_generic_m_phone_set_01"
+    ];
     ArrayPush(result, entry);
     entry.section = n"allVoice";
     entry.setting = n"whistles";

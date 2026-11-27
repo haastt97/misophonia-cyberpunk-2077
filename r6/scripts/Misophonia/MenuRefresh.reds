@@ -8,6 +8,10 @@ import RedscriptConfigFramework.*
 public abstract class MenuRefresh {
   public static func Update() -> Void {
     MenuRefresh.UpdateConfigurator();
+    MenuRefresh.UpdateScreens();
+  }
+
+  public static func UpdateScreens() -> Void {
     MenuRefresh.RefreshScreens(MenuRefresh.Window());
   }
 
