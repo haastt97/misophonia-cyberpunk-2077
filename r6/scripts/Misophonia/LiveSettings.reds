@@ -132,8 +132,12 @@ public class LiveSettings extends ScriptableService {
     if !this.propagating && Equals(groupPath, n"/mods/Misophonia/Misophonia.Config") {
       ArrayPush(this.changed, varName);
       if this.initialized {
-        // Propagate values in the same settings transaction. Audio and redraw run on the tick.
+        // Keep the slider's cached value in sync even when the deferred tick stalls in a menu.
+        let screensBefore = this.screens.GetValue();
         this.redrawPending = this.SyncControls(false) || this.redrawPending;
+        if this.screens.GetValue() != screensBefore {
+          MenuRefresh.UpdateScreens();
+        }
       }
       this.Schedule(0.03);
     }
@@ -235,8 +239,8 @@ public class LiveSettings extends ScriptableService {
       if Equals(all, this.previousMaster) {
         rootOrder = 0;
       }
-    } else {
-      rootOrder = all ? 1 : 0;
+    } else if rootOrder == 0 && all {
+      rootOrder = 1;
     }
 
     this.propagating = true;
@@ -356,11 +360,11 @@ public class LiveSettings extends ScriptableService {
     }
     let redraw = this.SyncControls(true) || this.redrawPending;
     this.redrawPending = false;
-    if !this.ApplyAudio() {
-      this.Schedule(0.50);
-    }
     if redraw {
       MenuRefresh.Update();
+    }
+    if !this.ApplyAudio() {
+      this.Schedule(0.50);
     }
   }
 }
