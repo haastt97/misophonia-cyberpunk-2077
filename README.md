@@ -1,8 +1,8 @@
 # Misophonia for Cyberpunk 2077
 
-Misophonia is a PC mod for muting selected sounds in Cyberpunk 2077. The configurable build has 37 sound categories, section-wide switches, a global **All** switch, and a **Screens** slider for TV and advert audio. The standalone archives apply a fixed set of mutes with the game's built-in archive loader.
+Misophonia is a PC mod for muting selected sounds in Cyberpunk 2077. The configurable build has 40 individual sound toggles, section-wide switches, a global **All** switch, and a **Screens** slider for TV and advert audio. The standalone archives apply a fixed set of mutes with the game's built-in archive loader.
 
-This repository starts with version **0.3.8**, built for Cyberpunk 2077 patch **2.5**. See the [changelog](CHANGELOG.md) for changes.
+Version **0.3.9** is built for Cyberpunk 2077 patch **2.5**. See the [changelog](CHANGELOG.md) for changes.
 
 ## Installation
 
@@ -29,14 +29,14 @@ Redscript Configuration Framework provides optional access through **Configure M
 
 Place one `.archive` in `Cyberpunk 2077/archive/pc/mod/` and start the game. The game loads these files without additional mods. Each archive replaces `base/sound/event/eventsmetadata.json`, so install one option at a time and check for conflicts with other mods serving that same resource. [Cyberpunk archive load order](https://wiki.redmodding.org/cyberpunk-2077-modding/for-mod-users/users-modding-cyberpunk-2077/load-order)
 
-| Standalone option | Muted events in 0.3.8 |
+| Standalone option | Muted events in 0.3.9 |
 | --- | ---: |
-| All Covered Sounds | 630 |
+| All Covered Sounds | 649 |
 | Eating and Drinking | 84 |
-| Body Sounds | 126 |
+| Body Sounds | 131 |
 | Repetitive Sounds | 92 |
-| Environmental Sounds | 32 |
-| Voice Sounds | 9 |
+| Environmental Sounds | 36 |
+| Voice Sounds | 19 |
 | Graphic Sound Effects | 44 |
 | Screens | 243 identified TV and advert events |
 
