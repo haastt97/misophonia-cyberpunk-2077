@@ -1,0 +1,15 @@
+/dist/
+/work/
+*.archive
+*.zip
+*.7z
+*.bak
+*.log
+*.sqlite3
+eventsmetadata.json
+eventsmetadata.json.json
+user.ini
+__pycache__/
+.env
+.env.*
+*.pem
