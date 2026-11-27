@@ -197,6 +197,14 @@ public class Config {
   public let choking: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Misophonia")
+  @runtimeProperty("ModSettings.category", "Body sounds")
+  @runtimeProperty("ModSettings.category.order", "3")
+  @runtimeProperty("ModSettings.order", "46")
+  @runtimeProperty("ModSettings.displayName", "Player Breathing and Panting")
+  @runtimeProperty("ModSettings.description", "Mute V's locomotion breathing and low-stamina panting.")
+  public let player_breathing: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Misophonia")
   @runtimeProperty("ModSettings.category", "Repetitive sounds")
   @runtimeProperty("ModSettings.category.order", "4")
   @runtimeProperty("ModSettings.order", "25")
@@ -293,6 +301,14 @@ public class Config {
   public let birds: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Misophonia")
+  @runtimeProperty("ModSettings.category", "Environmental sounds")
+  @runtimeProperty("ModSettings.category.order", "5")
+  @runtimeProperty("ModSettings.order", "47")
+  @runtimeProperty("ModSettings.displayName", "Mud and Wet Movement")
+  @runtimeProperty("ModSettings.description", "Mute wet crawl, movement, and impact sounds in the landfill sequence.")
+  public let mud_movement: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Misophonia")
   @runtimeProperty("ModSettings.category", "Voice sounds")
   @runtimeProperty("ModSettings.category.order", "6")
   @runtimeProperty("ModSettings.order", "37")
@@ -331,6 +347,14 @@ public class Config {
   @runtimeProperty("ModSettings.displayName", "Crying")
   @runtimeProperty("ModSettings.description", "Mute the crying sounds in this category.")
   public let crying: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Misophonia")
+  @runtimeProperty("ModSettings.category", "Voice sounds")
+  @runtimeProperty("ModSettings.category.order", "6")
+  @runtimeProperty("ModSettings.order", "48")
+  @runtimeProperty("ModSettings.displayName", "Ambient NPC Phone Calls")
+  @runtimeProperty("ModSettings.description", "Mute generic NPC phone conversation sounds.")
+  public let ambient_phone_calls: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Misophonia")
   @runtimeProperty("ModSettings.category", "Graphic sound effects")
