@@ -281,6 +281,9 @@ fn category_edits_keep_ids_and_update_the_build_plan() -> Result<()> {
     let mut review = setup(dir.path())?;
     let category = review.add_category("Kitchen", "Sounds")?;
     assert!(review.add_category("kitchen", "sounds").is_err());
+    assert!(review.add_category("None", "sounds").is_err());
+    assert!(review.add_category("Kitchen", "All").is_err());
+    assert!(review.add_category("General", "All in General").is_err());
     review.rename_section("Kitchen", "Personal")?;
     review.edit_category(&category, "Personal", "Swaps")?;
     review.save_many(vec![
@@ -336,5 +339,20 @@ fn bulk_conflict_rolls_back_every_edit() -> Result<()> {
     let review = setup(dir.path())?;
     assert_eq!(review.tags("donor"), &Tags::default());
     assert_eq!(review.tags("screen"), &donor("screenPercent"));
+    Ok(())
+}
+
+#[test]
+fn export_checks_that_tags_and_categories_use_the_same_snapshot() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut writer = setup(dir.path())?;
+    let reader = setup(dir.path())?;
+    let category = writer.add_category("Personal", "Paper")?;
+    writer.save("donor", candidate(&category, None))?;
+    assert!(reader.export().is_err());
+    assert_eq!(
+        setup(dir.path())?.export()?["sounds"][0]["tags"]["category"],
+        category
+    );
     Ok(())
 }

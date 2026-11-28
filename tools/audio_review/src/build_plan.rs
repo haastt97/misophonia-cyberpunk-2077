@@ -10,6 +10,7 @@ pub struct BuildPlan {
     pub categories: Vec<CategoryPlan>,
     pub stand_ins: BTreeMap<String, StandInPlan>,
     pub shared_events: BTreeSet<String>,
+    pub already_uncovered: BTreeSet<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +68,7 @@ impl BuildPlan {
         }
         let mut stand_ins = BTreeMap::new();
         let mut removals = BTreeSet::new();
+        let mut already_uncovered = BTreeSet::new();
         let mut additions = BTreeMap::new();
         for (id, tag) in &tags {
             if !tag.candidate && !tag.remove_coverage {
@@ -80,6 +82,9 @@ impl BuildPlan {
                 "{name} is marked both as a trigger and for removal. Choose one action before building"
             );
             if tag.remove_coverage {
+                if sound.coverage.is_empty() {
+                    already_uncovered.insert(name.clone());
+                }
                 removals.extend(
                     sound
                         .coverage
@@ -160,6 +165,7 @@ impl BuildPlan {
             categories,
             stand_ins,
             shared_events,
+            already_uncovered,
         })
     }
 }

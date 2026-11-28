@@ -79,6 +79,7 @@ fn options_use_safe_distinct_filenames_and_report_unsupported_donors() -> Result
             category("Empty", false, &[]),
         ],
         shared_events: BTreeSet::new(),
+        already_uncovered: BTreeSet::new(),
         stand_ins: BTreeMap::from([(
             "non-native-donor".to_owned(),
             StandInPlan {
@@ -115,6 +116,7 @@ fn options_use_safe_distinct_filenames_and_report_unsupported_donors() -> Result
                 &[("target", Some("non-native-donor"))],
             )],
             shared_events: BTreeSet::new(),
+            already_uncovered: BTreeSet::new(),
             stand_ins: plan.stand_ins,
         },
         &AtomicBool::default(),

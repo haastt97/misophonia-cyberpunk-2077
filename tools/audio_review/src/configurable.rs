@@ -127,8 +127,15 @@ impl<'a> Settings<'a> {
                 "Setting names cannot contain control characters"
             );
             ensure!(
-                !category.name.eq_ignore_ascii_case("All"),
-                "The sub-category name All is reserved for the section switch"
+                !category.section.eq_ignore_ascii_case("None"),
+                "Mod Settings reserves the category name None"
+            );
+            ensure!(
+                !category.name.eq_ignore_ascii_case("All")
+                    && !(category.section.eq_ignore_ascii_case("General")
+                        && category.name.eq_ignore_ascii_case("All in General")),
+                "The sub-category name {} is reserved for a section switch",
+                category.name
             );
             for event in category.events.keys() {
                 ensure!(valid_event(event), "Invalid sound event name {event:?}");

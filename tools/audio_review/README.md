@@ -24,12 +24,20 @@ The library includes packed effects, complete embedded soundbank clips, streamed
 - Search by filename, media ID, or linked event. Use **All sounds** for the full library and **Outside the mod** for installed files with no linked Misophonia setting.
 - The category dropdown starts on **All**. In the library, choosing a category narrows sounds with mod coverage and keeps files outside the mod visible. In **Candidates** and **Stand-ins**, it filters your review queue.
 - Use **Play** in a row to preview a clip. The shared player also supports pause, seeking, and preview volume.
-- Select **X** to tag a trigger candidate and tint its row red. Then choose the relevant mod category.
+- Select **X** to tag a trigger candidate and tint its row red. Choose a category and then a subcategory in the details panel.
 - Sounds with mod coverage have red names. Click their grey **X** to queue or clear a removal candidate in the review. The export includes `tags.remove_coverage` for queued removals.
 - Select **O** to tag a potential stand-in and tint its row green. Click the grey **O** on a stand-in to untag it. Choose a stand-in category if you want candidates in that category to use it. **Mute (default)** is available for every trigger candidate.
+- Shift-click to select a range. Ctrl-click (Cmd-click on macOS) to add or remove individual rows. The selection panel can tag or clear sounds, assign categories, and set a shared replacement. Play always previews a single sound.
+- Use **Categories…** to add a subcategory under an existing or new category, rename categories, move subcategories, or remove them. Removing a category clears its review assignments. Reassign or clear any affected trigger tags before building.
 - Use **Export review** to save tagged sounds, categories, replacement choices, and linked events as JSON.
 
 Coverage comes from the selected catalog. The configurable build supplies mute toggles and a **Screens** volume slider. The corresponding standalone archive uses a fixed mute. **Event only** identifies an existing control whose event has no linked installed clip in the SoundDB index.
+
+## Build a custom mod version
+
+Choose **Build version…**, enter a name, select a save folder, and click **Build packages**. Audio Review creates a new folder containing the configurable PC ZIP, eligible dependency-free standalone `.archive` files, corresponding single-archive Nexus ZIPs, and `build-report.json`. The configurable ZIP uses the standard Misophonia dependencies and bundles audio for the stand-ins you selected. Its Mod Settings menu reflects the edited category names and controls.
+
+The build applies decisions to named game events. Several clips can share one event, and sounds with no named event link need to be cleared from the build queue. A standalone archive can use a stand-in when the selected clip has an exact native event mapping. The report identifies options skipped for unavailable mappings and edited events shared by multiple clips. If individual **Screens** events change, the custom version uses an on/off switch for those events because the stock slider adjusts the whole Screens mixer.
 
 ## Saved data
 

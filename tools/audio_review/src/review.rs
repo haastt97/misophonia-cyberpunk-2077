@@ -154,6 +154,14 @@ impl Store {
         Ok(entries.collect::<rusqlite::Result<_>>()?)
     }
 
+    fn snapshot(&self) -> Result<(CategoryEdits, BTreeMap<String, Tags>)> {
+        let snapshot = self.0.unchecked_transaction()?;
+        let categories = Self::categories(&snapshot)?;
+        let tags = self.entries()?;
+        snapshot.commit()?;
+        Ok((categories, tags))
+    }
+
     fn edit_categories(&mut self, expected: &CategoryEdits, edits: &CategoryEdits) -> Result<()> {
         let db = self
             .0
@@ -330,8 +338,7 @@ impl Review {
 
         fs::create_dir_all(data).with_context(|| format!("Create {}", data.display()))?;
         let store = Store::open(&data.join("review.sqlite3"))?;
-        let tags = store.entries()?;
-        let category_edits = Store::categories(&store.0)?;
+        let (category_edits, tags) = store.snapshot()?;
         let categories = review_categories::effective(&catalog.categories, &category_edits);
         review_categories::validate(&categories)?;
         Ok(Self {
@@ -409,6 +416,7 @@ impl Review {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn save(&mut self, id: &str, tags: Tags) -> Result<usize> {
         self.save_many(vec![(id.to_owned(), tags)])
     }
@@ -539,6 +547,7 @@ impl Review {
     }
 
     fn apply_category_edits(&mut self, changes: CategoryEdits) -> Result<()> {
+        ensure!(!changes.is_empty(), "This category no longer exists");
         let mut proposed = self.category_edits.clone();
         proposed.extend(changes.clone());
         let categories = review_categories::effective(&self.catalog.categories, &proposed);
@@ -549,30 +558,27 @@ impl Review {
     }
 
     fn refresh_saved_review(&mut self) -> Result<()> {
-        let edits = Store::categories(&self.store.0)?;
+        let (edits, tags) = self.store.snapshot()?;
         if self.category_edits != edits {
             self.categories = review_categories::effective(&self.catalog.categories, &edits);
             self.category_edits = edits;
         }
-        self.tags = self.store.entries()?;
+        self.tags = tags;
         Ok(())
     }
 
     pub(crate) fn saved_tags(&self) -> Result<BTreeMap<String, Tags>> {
-        let snapshot = self.store.0.unchecked_transaction()?;
+        let (categories, tags) = self.store.snapshot()?;
         ensure!(
-            Store::categories(&snapshot)? == self.category_edits,
+            categories == self.category_edits,
             "Categories changed in another window. Reopen Audio Review to load them"
         );
-        let tags = self.store.entries()?;
-        snapshot.commit()?;
         Ok(tags)
     }
 
     fn export(&self) -> Result<serde_json::Value> {
         let sounds: Result<Vec<_>> = self
-            .store
-            .entries()?
+            .saved_tags()?
             .into_iter()
             .map(|(id, tags)| {
                 let mut sound = match self.index(&id) {

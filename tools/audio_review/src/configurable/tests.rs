@@ -28,6 +28,7 @@ fn plan(categories: Vec<CategoryPlan>) -> BuildPlan {
         categories,
         stand_ins: Default::default(),
         shared_events: Default::default(),
+        already_uncovered: Default::default(),
     }
 }
 

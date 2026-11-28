@@ -10,8 +10,10 @@ use selection::Selection;
 use crate::{
     Args, Library,
     catalog::{Category, Sound},
+    category_ui::{CategoryEditor, split_picker},
     job::Job,
     load,
+    package_ui::PackageDialog,
     player::{Action, Player},
     review::{Review, Tags, View, kind_label},
 };
@@ -29,6 +31,8 @@ pub struct Desktop {
     filters: Filters,
     visible: Vec<usize>,
     selection: Selection,
+    category_editor: CategoryEditor,
+    package_dialog: PackageDialog,
     warning: String,
     status: Option<(String, bool)>,
 }
@@ -82,6 +86,8 @@ impl Desktop {
             filters: Filters::default(),
             visible: Vec::new(),
             selection: Selection::default(),
+            category_editor: CategoryEditor::default(),
+            package_dialog: PackageDialog::default(),
             warning: String::new(),
             status: None,
         }
@@ -151,6 +157,12 @@ impl Desktop {
             ui.heading("Misophonia Audio Review");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 export = ui.button("Export review…").clicked();
+                if ui.button("Build version…").clicked() {
+                    self.package_dialog.open(&review.catalog.version);
+                }
+                if ui.button("Categories…").clicked() {
+                    self.category_editor.open = true;
+                }
                 ui.weak(format!(
                     "{} audio files  ·  Misophonia {}",
                     count(review.audio_count),
@@ -182,7 +194,7 @@ impl Desktop {
                 "filter-category",
                 "All",
                 &mut self.filters.category,
-                &review.catalog.categories,
+                &review.categories,
                 150.,
             )
             .on_hover_text("Category filter. All sounds and Outside the mod keep files with no linked mod coverage visible.");
@@ -322,8 +334,8 @@ impl Desktop {
                             labels.push("Removal candidate".to_owned());
                         }
                         for coverage in &sound.coverage {
-                            let name =
-                                category_name(&review.catalog.categories, &coverage.category);
+                            let name = coverage_category(review, &coverage.category)
+                                .map_or(coverage.category.as_str(), |c| c.name.as_str());
                             let mode = if coverage.mode == "volume" {
                                 "slider"
                             } else {
@@ -625,6 +637,22 @@ impl eframe::App for Desktop {
                 ui.colored_label(RED, message);
             }
         });
+        if let Some(library) = &mut self.library
+            && self.category_editor.show(ctx, &mut library.review)
+        {
+            if self
+                .filters
+                .category
+                .as_deref()
+                .is_some_and(|id| library.review.category(id).is_none())
+            {
+                self.filters.category = None;
+            }
+            self.refresh();
+        }
+        if let Some(library) = &self.library {
+            self.package_dialog.show(ctx, frame, library);
+        }
     }
 }
 
@@ -725,28 +753,14 @@ fn bulk_inspector(ui: &mut egui::Ui, review: &Review, selection: &Selection) -> 
 
         let candidate_category = common(candidates.clone().map(|tags| tags.category.as_deref()));
         let common_replacement = common(candidates.clone().map(|tags| tags.replacement.as_deref()));
-        let category_list = &review.catalog.categories;
+        let category_list = &review.categories;
         let category_width = ui.available_width() - 12.;
         ui.label("Candidate category");
         ui.add_enabled_ui(candidates.clone().next().is_some(), |ui| {
             // An empty ID lets the shared picker distinguish mixed values from clearing all.
             let mut choice =
                 candidate_category.map_or_else(|| Some(String::new()), |id| id.map(str::to_owned));
-            let placeholder = if candidate_category.is_none() {
-                "Mixed or unassigned"
-            } else {
-                "Choose category"
-            };
-            if categories(
-                ui,
-                "candidate",
-                placeholder,
-                &mut choice,
-                category_list,
-                category_width,
-            )
-            .changed()
-            {
+            if split_picker(ui, "candidate", &mut choice, category_list, category_width) {
                 action = Some(BulkAction::CandidateCategory(choice));
             }
         });
@@ -799,21 +813,7 @@ fn bulk_inspector(ui: &mut egui::Ui, review: &Review, selection: &Selection) -> 
         ui.add_enabled_ui(stand_in_count > 0, |ui| {
             let mut choice =
                 stand_in_category.map_or_else(|| Some(String::new()), |id| id.map(str::to_owned));
-            let placeholder = if stand_in_category.is_none() {
-                "Mixed or unassigned"
-            } else {
-                "Choose category"
-            };
-            if categories(
-                ui,
-                "stand-in",
-                placeholder,
-                &mut choice,
-                category_list,
-                category_width,
-            )
-            .changed()
-            {
+            if split_picker(ui, "stand-in", &mut choice, category_list, category_width) {
                 action = Some(BulkAction::StandInCategory(choice));
             }
         });
@@ -825,7 +825,7 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
     let sound = &review.sounds[index];
     let original = review.tags(&sound.asset.id);
     let mut tags = original.clone();
-    let categories_list = &review.catalog.categories;
+    let categories_list = &review.categories;
     ui.push_id(&sound.asset.id, |ui| {
         ui.heading(&sound.asset.name);
         ui.add(
@@ -834,9 +834,7 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
         );
         ui.add_space(8.);
         for entry in &sound.coverage {
-            let category = categories_list
-                .iter()
-                .find(|category| category.id == entry.category);
+            let category = coverage_category(review, &entry.category);
             if let Some(category) = category {
                 let control = if entry.mode == "volume" {
                     "volume slider"
@@ -870,16 +868,13 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
 
         ui.label("Candidate category");
         ui.add_enabled_ui(tags.candidate, |ui| {
-            if categories(
+            if split_picker(
                 ui,
                 "candidate",
-                "Choose category",
                 &mut tags.category,
                 categories_list,
                 ui.available_width() - 12.,
-            )
-            .changed()
-            {
+            ) {
                 tags.replacement = None;
             }
         });
@@ -909,10 +904,9 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
         });
         ui.label("Stand-in category");
         ui.add_enabled_ui(tags.stand_in, |ui| {
-            categories(
+            split_picker(
                 ui,
                 "stand-in",
-                "Choose category",
                 &mut tags.stand_in_category,
                 categories_list,
                 ui.available_width() - 12.,
@@ -971,11 +965,14 @@ fn categories(
     response
 }
 
-fn category_name<'a>(categories: &'a [Category], key: &'a str) -> &'a str {
-    categories
-        .iter()
-        .find(|category| category.id == key)
-        .map_or(key, |category| &category.name)
+fn coverage_category<'a>(review: &'a Review, id: &str) -> Option<&'a Category> {
+    review.category(id).or_else(|| {
+        review
+            .catalog
+            .categories
+            .iter()
+            .find(|category| category.id == id)
+    })
 }
 
 fn tints(tags: &Tags) -> (Option<Color32>, Option<Color32>) {

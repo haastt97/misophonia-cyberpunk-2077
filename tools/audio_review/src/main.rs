@@ -1,11 +1,16 @@
 mod build_plan;
 mod catalog;
+mod category_ui;
+mod configurable;
 mod desktop;
 mod game;
 mod job;
+mod package_build;
+mod package_ui;
 mod player;
 mod review;
 mod review_categories;
+mod standalone;
 
 use std::{
     env, fs,
@@ -51,6 +56,7 @@ struct Args {
 struct Library {
     game: Arc<Game>,
     review: Review,
+    package_source: package_build::PackageSource,
 }
 
 fn expand(path: &Path) -> PathBuf {
@@ -100,17 +106,28 @@ fn load(args: Args, cancelled: &AtomicBool) -> Result<Library> {
         !cancelled.load(Ordering::Relaxed),
         "Audio library indexing canceled"
     );
+    let game_root = expand(&args.game)
+        .canonicalize()
+        .context("Open the Cyberpunk installation")?;
     let (game, assets) = Game::build(
-        &expand(&args.game),
+        &game_root,
         &cache,
         args.wolvenkit.as_deref().map(expand).as_deref(),
         args.decoder.as_deref().map(expand).as_deref(),
         cancelled,
     )?;
     let review = Review::open(catalog, assets, &events, &data)?;
+    let package_source = package_build::PackageSource {
+        game: game_root,
+        catalog: catalog_root
+            .canonicalize()
+            .context("Open the Misophonia source folder")?,
+        wolvenkit: game.wolvenkit().map(Path::to_path_buf),
+    };
     Ok(Library {
         game: Arc::new(game),
         review,
+        package_source,
     })
 }
 

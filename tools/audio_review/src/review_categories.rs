@@ -59,9 +59,26 @@ pub fn effective(base: &[Category], edits: &CategoryEdits) -> Vec<Category> {
 
 pub fn validate(categories: &[Category]) -> Result<()> {
     let mut display_names = BTreeSet::new();
+    let mut section_spellings = BTreeMap::new();
     for category in categories {
         let section = category.section.to_lowercase();
         let name = category.name.to_lowercase();
+        let spelling = section_spellings
+            .entry(section.clone())
+            .or_insert(&category.section);
+        ensure!(
+            *spelling == &category.section,
+            "Use the existing category spelling: {spelling}"
+        );
+        ensure!(
+            section != "none",
+            "None is reserved by Mod Settings. Choose another category name"
+        );
+        ensure!(
+            name != "all" && !(section == "general" && name == "all in general"),
+            "{} is reserved for a Mod Settings switch",
+            category.name
+        );
         ensure!(
             display_names.insert((section, name)),
             "A subcategory named {} already exists in {}",

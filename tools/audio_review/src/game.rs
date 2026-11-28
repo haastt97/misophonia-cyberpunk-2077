@@ -138,6 +138,10 @@ pub struct Game {
 }
 
 impl Game {
+    pub fn wolvenkit(&self) -> Option<&Path> {
+        self.wolvenkit.as_deref()
+    }
+
     pub fn build(
         game: &Path,
         cache: &Path,
