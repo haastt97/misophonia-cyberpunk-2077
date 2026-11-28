@@ -1,12 +1,15 @@
+mod selection;
+
 use std::time::Duration;
 
 use anyhow::Result;
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column, TableBuilder};
+use selection::Selection;
 
 use crate::{
     Args, Library,
-    catalog::Category,
+    catalog::{Category, Sound},
     job::Job,
     load,
     player::{Action, Player},
@@ -25,7 +28,7 @@ pub struct Desktop {
     player: Player,
     filters: Filters,
     visible: Vec<usize>,
-    selected: Option<usize>,
+    selection: Selection,
     warning: String,
     status: Option<(String, bool)>,
 }
@@ -43,6 +46,14 @@ enum RowAction {
     Play(usize),
     Candidate(usize),
     StandIn(usize),
+}
+
+enum BulkAction {
+    Mark(bool),
+    StandIn(bool),
+    CandidateCategory(Option<String>),
+    StandInCategory(Option<String>),
+    Replacement(Option<String>),
 }
 
 impl Desktop {
@@ -70,7 +81,7 @@ impl Desktop {
             player: Player::default(),
             filters: Filters::default(),
             visible: Vec::new(),
-            selected: None,
+            selection: Selection::default(),
             warning: String::new(),
             status: None,
         }
@@ -88,6 +99,7 @@ impl Desktop {
                     self.warning = library.game.warnings.join(" ");
                     self.library = Some(library);
                     self.refresh();
+                    self.select_first_if_empty();
                 }
                 Err(error) => self.report(Err(error.context("Could not open the audio library"))),
             }
@@ -116,12 +128,15 @@ impl Desktop {
                 filters.category.as_deref(),
                 filters.kind.as_deref(),
             );
-            if self
-                .selected
-                .is_none_or(|selection| self.visible.binary_search(&selection).is_err())
-            {
-                self.selected = self.visible.first().copied();
-            }
+            self.selection.retain_visible(&self.visible);
+        }
+    }
+
+    fn select_first_if_empty(&mut self) {
+        if self.selection.primary().is_none()
+            && let Some(first) = self.visible.first()
+        {
+            self.selection.single(*first);
         }
     }
 
@@ -192,6 +207,7 @@ impl Desktop {
         });
         if previous != self.filters {
             self.refresh();
+            self.select_first_if_empty();
         }
         if export {
             self.export(frame);
@@ -221,6 +237,9 @@ impl Desktop {
     fn table(&mut self, ui: &mut egui::Ui) -> Option<RowAction> {
         let review = &self.library.as_ref()?.review;
         let mut action = None;
+        let multiselect = ui.input(|input| {
+            input.modifiers.shift || input.modifiers.command || input.modifiers.ctrl
+        });
         if self.visible.is_empty() {
             ui.centered_and_justified(|ui| ui.weak("No matching sounds"));
             return None;
@@ -254,7 +273,7 @@ impl Desktop {
                     let removal_action = covered || tags.remove_coverage;
                     let active = self.player.action(index);
                     let (name_tint, coverage_tint) = tints(tags);
-                    row.set_selected(self.selected == Some(index));
+                    row.set_selected(self.selection.contains(index));
                     row.col(|ui| {
                         ui.scope_builder(
                             egui::UiBuilder::new().id(("preview", &sound.asset.id)),
@@ -290,7 +309,7 @@ impl Desktop {
                             .on_hover_text(
                                 sound.asset.path.as_deref().unwrap_or(&sound.asset.detail),
                             );
-                        if response.double_clicked() && sound.playable {
+                        if !multiselect && response.double_clicked() && sound.playable {
                             action = Some(RowAction::Play(index));
                         } else if response.clicked() {
                             action = Some(RowAction::Select(index));
@@ -382,7 +401,11 @@ impl Desktop {
                         );
                     });
                     let response = row.response();
-                    if action.is_none() && response.double_clicked() && sound.playable {
+                    if action.is_none()
+                        && !multiselect
+                        && response.double_clicked()
+                        && sound.playable
+                    {
                         action = Some(RowAction::Play(index));
                     } else if action.is_none() && response.clicked() {
                         action = Some(RowAction::Select(index));
@@ -395,67 +418,92 @@ impl Desktop {
     fn apply(&mut self, ctx: &egui::Context, action: RowAction) {
         let Some(library) = &self.library else { return };
         match action {
-            RowAction::Select(index) => self.selected = Some(index),
+            RowAction::Select(index) => {
+                let modifiers = ctx.input(|input| input.modifiers);
+                self.selection.click(
+                    &self.visible,
+                    index,
+                    modifiers.shift,
+                    modifiers.command || modifiers.ctrl,
+                );
+            }
             RowAction::Play(index) => {
-                self.selected = Some(index);
+                if self.selection.len() <= 1 {
+                    self.selection.single(index);
+                }
                 let sound = &library.review.sounds[index];
                 self.player
                     .toggle(ctx, &library.game, index, &sound.asset.id);
                 ctx.request_repaint();
             }
             RowAction::Candidate(index) | RowAction::StandIn(index) => {
-                let sound = &library.review.sounds[index];
-                let mut tags = library.review.tags(&sound.asset.id).clone();
-                if matches!(action, RowAction::Candidate(_)) {
-                    if !sound.coverage.is_empty() || tags.remove_coverage {
-                        tags.remove_coverage = !tags.remove_coverage;
-                    } else {
-                        tags.candidate = !tags.candidate;
-                        tags.category = if tags.candidate {
-                            tags.stand_in_category.clone()
-                        } else {
-                            None
-                        };
-                        tags.replacement = None;
-                    }
-                } else {
-                    tags.stand_in = !tags.stand_in;
-                    tags.stand_in_category = if tags.stand_in {
-                        tags.category.clone()
-                    } else {
-                        None
-                    };
+                if !self.selection.contains(index) {
+                    self.selection.single(index);
                 }
-                self.save(index, tags);
+                let sound = &library.review.sounds[index];
+                let tags = library.review.tags(&sound.asset.id);
+                let action = if matches!(action, RowAction::Candidate(_)) {
+                    BulkAction::Mark(!candidate_marked(sound, tags))
+                } else {
+                    BulkAction::StandIn(!tags.stand_in)
+                };
+                self.apply_bulk(action);
             }
         }
     }
 
-    fn save(&mut self, index: usize, tags: Tags) {
+    fn apply_bulk(&mut self, action: BulkAction) {
+        let Some(library) = &self.library else { return };
+        let edits = self
+            .selection
+            .iter()
+            .filter_map(|index| {
+                let sound = &library.review.sounds[index];
+                let existing = library.review.tags(&sound.asset.id);
+                let mut tags = existing.clone();
+                edit_tags(&action, sound, &mut tags);
+                (tags != *existing).then(|| (sound.asset.id.clone(), tags))
+            })
+            .collect();
+        self.save(edits);
+    }
+
+    fn save(&mut self, edits: Vec<(String, Tags)>) {
+        if edits.is_empty() {
+            return;
+        }
         let Some(library) = &mut self.library else {
             return;
         };
-        let id = library.review.sounds[index].asset.id.clone();
-        let outcome = library.review.save(&id, tags);
-        self.selected = Some(index);
+        let edited = edits.len();
+        let outcome = library.review.save_many(edits);
         self.refresh();
         self.report(
             outcome
                 .map(|reset| {
-                    if reset == 0 {
+                    let summary = if edited == 1 {
                         "Review tag saved.".to_owned()
                     } else {
-                        format!("Reset {} replacement choices to mute.", count(reset))
+                        format!("Saved tags for {} sounds.", count(edited))
+                    };
+                    if reset == 0 {
+                        summary
+                    } else {
+                        format!(
+                            "{summary} Reset {} replacement choices to mute.",
+                            count(reset)
+                        )
                     }
                 })
-                .map_err(|error| error.context("Could not save the tag")),
+                .map_err(|error| error.context("Could not save the tags")),
         );
     }
 
     fn transport(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(library) = &self.library else { return };
         let usable = self
-            .selected
+            .selection
+            .primary()
             .filter(|index| library.review.sounds[*index].playable);
         let index = self.player.index.or(usable);
         let action = index.map_or(Action::Play, |index| self.player.action(index));
@@ -521,6 +569,10 @@ impl eframe::App for Desktop {
             if self.library.is_some() {
                 ui.horizontal(|ui| {
                     ui.weak(format!("{} matching sounds", count(self.visible.len())));
+                    if self.selection.len() > 1 {
+                        ui.separator();
+                        ui.weak(format!("{} selected", count(self.selection.len())));
+                    }
                     if let Some((message, error)) = &self.status {
                         ui.separator();
                         ui.label(RichText::new(message).color(if *error {
@@ -535,16 +587,28 @@ impl eframe::App for Desktop {
                 }
             }
         });
-        if let Some(index) = self.selected
-            && let Some(library) = &self.library
-        {
-            let changed = egui::SidePanel::right("inspect")
-                .default_width(294.)
-                .width_range(270.0..=440.0)
-                .show(ctx, |ui| inspector(ui, &library.review, index))
-                .inner;
-            if let Some(tags) = changed {
-                self.save(index, tags);
+        if let Some(library) = &self.library {
+            if self.selection.len() > 1 {
+                let action = egui::SidePanel::right("inspect")
+                    .default_width(294.)
+                    .width_range(270.0..=440.0)
+                    .show(ctx, |ui| {
+                        bulk_inspector(ui, &library.review, &self.selection)
+                    })
+                    .inner;
+                if let Some(action) = action {
+                    self.apply_bulk(action);
+                }
+            } else if let Some(index) = self.selection.primary() {
+                let changed = egui::SidePanel::right("inspect")
+                    .default_width(294.)
+                    .width_range(270.0..=440.0)
+                    .show(ctx, |ui| inspector(ui, &library.review, index))
+                    .inner;
+                if let Some(tags) = changed {
+                    let id = library.review.sounds[index].asset.id.clone();
+                    self.save(vec![(id, tags)]);
+                }
             }
         }
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -562,6 +626,199 @@ impl eframe::App for Desktop {
             }
         });
     }
+}
+
+fn candidate_marked(sound: &Sound, tags: &Tags) -> bool {
+    if !sound.coverage.is_empty() || tags.remove_coverage {
+        tags.remove_coverage
+    } else {
+        tags.candidate
+    }
+}
+
+fn edit_tags(action: &BulkAction, sound: &Sound, tags: &mut Tags) {
+    match action {
+        BulkAction::Mark(marked) if !sound.coverage.is_empty() || tags.remove_coverage => {
+            tags.remove_coverage = *marked;
+        }
+        BulkAction::Mark(marked) if tags.candidate != *marked => {
+            tags.candidate = *marked;
+            tags.category = if *marked {
+                tags.stand_in_category.clone()
+            } else {
+                None
+            };
+            tags.replacement = None;
+        }
+        BulkAction::StandIn(marked) if sound.playable && tags.stand_in != *marked => {
+            tags.stand_in = *marked;
+            tags.stand_in_category = if *marked { tags.category.clone() } else { None };
+        }
+        BulkAction::CandidateCategory(category) if tags.candidate && tags.category != *category => {
+            tags.category.clone_from(category);
+            tags.replacement = None;
+        }
+        BulkAction::StandInCategory(category) if tags.stand_in => {
+            tags.stand_in_category.clone_from(category);
+        }
+        BulkAction::Replacement(donor) if tags.candidate => tags.replacement.clone_from(donor),
+        _ => {}
+    }
+}
+
+fn common<'a>(mut values: impl Iterator<Item = Option<&'a str>>) -> Option<Option<&'a str>> {
+    let first = values.next()?;
+    values.all(|value| value == first).then_some(first)
+}
+
+fn bulk_inspector(ui: &mut egui::Ui, review: &Review, selection: &Selection) -> Option<BulkAction> {
+    let selected = selection.iter().map(|index| {
+        let sound = &review.sounds[index];
+        (sound, review.tags(&sound.asset.id))
+    });
+    let mut marked = 0;
+    let mut stand_in_count = 0;
+    let mut can_tag_stand_in = false;
+    for (sound, tags) in selected.clone() {
+        marked += usize::from(candidate_marked(sound, tags));
+        stand_in_count += usize::from(tags.stand_in);
+        can_tag_stand_in |= sound.playable && !tags.stand_in;
+    }
+    let candidates = selected
+        .clone()
+        .filter_map(|(_, tags)| tags.candidate.then_some(tags));
+    let stand_ins = selected.filter_map(|(_, tags)| tags.stand_in.then_some(tags));
+    let mut action = None;
+    ui.push_id("bulk-review", |ui| {
+        ui.heading(format!("{} sounds selected", count(selection.len())));
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(marked < selection.len(), egui::Button::new("Mark X"))
+                .on_hover_text("Tag trigger candidates or mark covered sounds for removal")
+                .clicked()
+            {
+                action = Some(BulkAction::Mark(true));
+            }
+            if ui
+                .add_enabled(marked > 0, egui::Button::new("Clear X"))
+                .on_hover_text("Clear the X mark from selected sounds")
+                .clicked()
+            {
+                action = Some(BulkAction::Mark(false));
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(can_tag_stand_in, egui::Button::new("Tag stand-ins"))
+                .clicked()
+            {
+                action = Some(BulkAction::StandIn(true));
+            }
+            if ui
+                .add_enabled(stand_in_count > 0, egui::Button::new("Clear stand-ins"))
+                .clicked()
+            {
+                action = Some(BulkAction::StandIn(false));
+            }
+        });
+        ui.separator();
+
+        let candidate_category = common(candidates.clone().map(|tags| tags.category.as_deref()));
+        let common_replacement = common(candidates.clone().map(|tags| tags.replacement.as_deref()));
+        let category_list = &review.catalog.categories;
+        let category_width = ui.available_width() - 12.;
+        ui.label("Candidate category");
+        ui.add_enabled_ui(candidates.clone().next().is_some(), |ui| {
+            // An empty ID lets the shared picker distinguish mixed values from clearing all.
+            let mut choice =
+                candidate_category.map_or_else(|| Some(String::new()), |id| id.map(str::to_owned));
+            let placeholder = if candidate_category.is_none() {
+                "Mixed or unassigned"
+            } else {
+                "Choose category"
+            };
+            if categories(
+                ui,
+                "candidate",
+                placeholder,
+                &mut choice,
+                category_list,
+                category_width,
+            )
+            .changed()
+            {
+                action = Some(BulkAction::CandidateCategory(choice));
+            }
+        });
+
+        ui.label("Replacement");
+        ui.add_enabled_ui(candidates.clone().next().is_some(), |ui| {
+            let donors = review.stand_ins(candidate_category.flatten(), "");
+            let description = match common_replacement {
+                Some(None) => "Mute (default)",
+                Some(Some(id)) => donors
+                    .iter()
+                    .find(|donor| donor.id == id)
+                    .map_or("Saved stand-in (unavailable)", |donor| donor.name.as_str()),
+                None => "Mixed replacements",
+            };
+            egui::ComboBox::from_id_salt("replacement")
+                .selected_text(description)
+                .truncate()
+                .width(category_width)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(common_replacement == Some(None), "Mute (default)")
+                        .clicked()
+                    {
+                        action = Some(BulkAction::Replacement(None));
+                    }
+                    if candidate_category.flatten().is_none() {
+                        ui.weak("Assign a shared category to choose a stand-in.");
+                    }
+                    for donor in donors {
+                        let self_replacement = review.index(&donor.id).is_some_and(|index| {
+                            selection.contains(index) && review.tags(&donor.id).candidate
+                        });
+                        if !self_replacement
+                            && ui
+                                .selectable_label(
+                                    common_replacement == Some(Some(donor.id.as_str())),
+                                    &donor.name,
+                                )
+                                .clicked()
+                        {
+                            action = Some(BulkAction::Replacement(Some(donor.id.clone())));
+                        }
+                    }
+                });
+        });
+
+        let stand_in_category = common(stand_ins.map(|tags| tags.stand_in_category.as_deref()));
+        ui.label("Stand-in category");
+        ui.add_enabled_ui(stand_in_count > 0, |ui| {
+            let mut choice =
+                stand_in_category.map_or_else(|| Some(String::new()), |id| id.map(str::to_owned));
+            let placeholder = if stand_in_category.is_none() {
+                "Mixed or unassigned"
+            } else {
+                "Choose category"
+            };
+            if categories(
+                ui,
+                "stand-in",
+                placeholder,
+                &mut choice,
+                category_list,
+                category_width,
+            )
+            .changed()
+            {
+                action = Some(BulkAction::StandInCategory(choice));
+            }
+        });
+    });
+    action
 }
 
 fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
