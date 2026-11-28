@@ -551,3 +551,61 @@ fn separate_workspaces_cannot_both_replace_the_same_saved_revision() -> Result<(
     assert_eq!(data["tags"].as_object().unwrap().len(), 1);
     Ok(())
 }
+
+#[test]
+fn renaming_or_moving_an_assigned_category_preserves_all_links() -> Result<()> {
+    use crate::build_plan::BuildPlan;
+
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let original_section = review.category("food").unwrap().section.clone();
+    let stand_in = donor("food");
+    let trigger = candidate("food", Some("donor"));
+    review.save_many(vec![
+        ("donor".to_owned(), stand_in.clone()),
+        ("trigger".to_owned(), trigger.clone()),
+    ])?;
+    let covered_rows = review.filter("", View::Covered, Some("food"), None);
+    assert!(covered_rows.contains(&review.index("trigger").unwrap()));
+
+    review.rename_section(&original_section, "Meals")?;
+    assert_eq!(review.category("food").unwrap().section, "Meals");
+    assert_eq!(review.category("drinking").unwrap().section, "Meals");
+    review.edit_category("food", "Personal sounds", "Chewing and bites")?;
+
+    let saved = review.save_project(Some(&dir.path().join("Renamed review")))?;
+    review.new_project()?;
+    review.open_project(&saved)?;
+    let category = review.category("food").unwrap();
+    assert_eq!(category.section, "Personal sounds");
+    assert_eq!(category.name, "Chewing and bites");
+    assert_eq!(review.category("drinking").unwrap().section, "Meals");
+    assert_eq!(review.tags("trigger"), &trigger);
+    assert_eq!(review.tags("donor"), &stand_in);
+    assert_eq!(
+        review.filter("", View::Candidates, Some("food"), None),
+        vec![review.index("trigger").unwrap()]
+    );
+    assert_eq!(
+        review.filter("", View::StandIns, Some("food"), None),
+        vec![review.index("donor").unwrap()]
+    );
+    assert_eq!(
+        review.filter("", View::Covered, Some("food"), None),
+        covered_rows
+    );
+
+    let plan = BuildPlan::from_review(&review)?;
+    let category = plan
+        .categories
+        .iter()
+        .find(|category| category.id == "food")
+        .unwrap();
+    assert_eq!(category.section, "Personal sounds");
+    assert_eq!(category.name, "Chewing and bites");
+    assert_eq!(
+        category.events["cmn_generic_male_eat_chrunchy"].as_deref(),
+        Some("donor")
+    );
+    Ok(())
+}

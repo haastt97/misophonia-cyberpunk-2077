@@ -92,6 +92,7 @@ pub fn split_picker(
 pub struct CategoryEditor {
     pub open: bool,
     form: Option<Form>,
+    reveal_section: Option<String>,
     confirm_remove: bool,
     error: Option<String>,
 }
@@ -117,6 +118,7 @@ impl CategoryEditor {
         let Self {
             open,
             form,
+            reveal_section,
             confirm_remove,
             error,
         } = self;
@@ -125,6 +127,7 @@ impl CategoryEditor {
             .open(open)
             .default_width(695.)
             .show(ctx, |ui| {
+                let reveal = reveal_section.take();
                 let mut sections: BTreeMap<String, Vec<Category>> = BTreeMap::new();
                 for category in &review.categories {
                     sections.entry(category.section.clone()).or_default().push(category.clone());
@@ -143,7 +146,9 @@ impl CategoryEditor {
                     egui::ScrollArea::vertical().id_salt("manage-category-list").max_height(375.).show(left, |ui| {
                         for (section, children) in sections {
                             ui.push_id(&section, |ui| {
-                                ui.collapsing(&section, |ui| {
+                                egui::CollapsingHeader::new(&section)
+                                    .open((reveal.as_deref() == Some(section.as_str())).then_some(true))
+                                    .show(ui, |ui| {
                                     if ui.button("Edit category").clicked() {
                                         next_form = Some(Form::Category { original: section.to_owned(), name: section.to_owned() });
                                     }
@@ -180,7 +185,11 @@ impl CategoryEditor {
                         }
                         Form::Subcategory { id, section, name } => {
                             right.label("Category name");
-                            right.text_edit_singleline(section).on_hover_text("Enter an existing category or create a new one.");
+                            right.text_edit_singleline(section).on_hover_text(if id.is_some() {
+                                "Change the parent category to move this subcategory and its assigned sounds."
+                            } else {
+                                "Enter an existing category or create a new one."
+                            });
                             right.label("Subcategory name");
                             right.text_edit_singleline(name);
                             id.is_some()
@@ -231,7 +240,13 @@ impl CategoryEditor {
                                 if removed {
                                     *form = None;
                                     *confirm_remove = false;
+                                } else {
+                                    *reveal_section = Some(match current {
+                                        Form::Category { original, .. } => original.clone(),
+                                        Form::Subcategory { section, .. } => section.trim().to_owned(),
+                                    });
                                 }
+                                ctx.request_repaint();
                             }
                             Err(problem) => *error = Some(format!("{problem:#}")),
                         }
