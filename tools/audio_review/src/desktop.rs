@@ -10,7 +10,7 @@ use selection::Selection;
 use crate::{
     Args, Library,
     catalog::{Category, Sound},
-    category_ui::{CategoryEditor, split_picker},
+    category_ui::{CategoryEditor, filter_picker, split_picker},
     job::Job,
     load,
     package_ui::PackageDialog,
@@ -193,15 +193,8 @@ impl Desktop {
                 })
                 .response
                 .on_hover_text("Filter by mod coverage or review tag");
-            categories(
-                ui,
-                "filter-category",
-                "All",
-                &mut self.filters.category,
-                &review.categories,
-                150.,
-            )
-            .on_hover_text("Category filter. All sounds and Outside the mod keep files with no linked mod coverage visible.");
+            filter_picker(ui, &mut self.filters.category, &review.categories)
+                .on_hover_text("Category filter. All sounds and Outside the mod keep files with no linked mod coverage visible.");
             egui::ComboBox::from_id_salt("kind-filter")
                 .selected_text(
                     self.filters
@@ -244,7 +237,7 @@ impl Desktop {
             Ok(Some(outcome)) => {
                 if outcome.switched {
                     self.filters = Filters::default();
-                    self.selection = Selection::default();
+                    self.selection.clear();
                     self.player.stop();
                     self.category_editor = CategoryEditor::default();
                     self.package_dialog.project_changed();
@@ -661,7 +654,12 @@ impl eframe::App for Desktop {
                 let changed = egui::SidePanel::right("inspect")
                     .default_width(294.)
                     .width_range(270.0..=440.0)
-                    .show(ctx, |ui| inspector(ui, &library.review, index))
+                    .show(ctx, |ui| {
+                        ui.push_id(self.selection.revision(), |ui| {
+                            inspector(ui, &library.review, index)
+                        })
+                        .inner
+                    })
                     .inner;
                 if let Some(tags) = changed {
                     let id = library.review.sounds[index].asset.id.clone();
@@ -768,7 +766,7 @@ fn bulk_inspector(ui: &mut egui::Ui, review: &Review, selection: &Selection) -> 
         .filter_map(|(_, tags)| tags.candidate.then_some(tags));
     let stand_ins = selected.filter_map(|(_, tags)| tags.stand_in.then_some(tags));
     let mut action = None;
-    ui.push_id("bulk-review", |ui| {
+    ui.push_id(("bulk-review", selection.revision()), |ui| {
         ui.heading(format!("{} sounds selected", count(selection.len())));
         ui.horizontal(|ui| {
             if ui
@@ -975,45 +973,6 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
         });
     });
     (tags != *original).then_some(tags)
-}
-
-fn categories(
-    ui: &mut egui::Ui,
-    id: &str,
-    empty: &str,
-    value: &mut Option<String>,
-    categories: &[Category],
-    width: f32,
-) -> egui::Response {
-    let label = value
-        .as_deref()
-        .and_then(|id| categories.iter().find(|item| item.id == id))
-        .map_or_else(
-            || empty.to_owned(),
-            |item| format!("{} / {}", item.section, item.name),
-        );
-    let mut changed = false;
-    let mut response = egui::ComboBox::from_id_salt(id)
-        .selected_text(label)
-        .truncate()
-        .width(width)
-        .show_ui(ui, |ui| {
-            changed |= ui.selectable_value(value, None, empty).changed();
-            for category in categories {
-                changed |= ui
-                    .selectable_value(
-                        value,
-                        Some(category.id.clone()),
-                        format!("{} / {}", category.section, category.name),
-                    )
-                    .changed();
-            }
-        })
-        .response;
-    if changed {
-        response.mark_changed();
-    }
-    response
 }
 
 fn coverage_category<'a>(review: &'a Review, id: &str) -> Option<&'a Category> {

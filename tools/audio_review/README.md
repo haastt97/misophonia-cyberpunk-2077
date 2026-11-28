@@ -23,6 +23,7 @@ The library includes packed effects, complete embedded soundbank clips, streamed
 
 - Search by filename, media ID, or linked event. Use **All sounds** for the full library and **Outside the mod** for installed files with no linked Misophonia setting.
 - The category dropdown starts on **All**. In the library, choosing a category narrows sounds with mod coverage and keeps files outside the mod visible. In **Candidates** and **Stand-ins**, it filters your review queue.
+- Open a category or subcategory picker and type to search all groups by name. Press **Enter** to choose the first match, or click any result. **Categories…** also has a search box for the category tree.
 - Use **Play** in a row to preview a clip. The shared player also supports pause, seeking, and preview volume.
 - Select **X** to tag a trigger candidate and tint its row red. Choose a category and then a subcategory in the details panel.
 - Sounds with mod coverage have red names. Click their grey **X** to queue or clear a removal candidate in the review. The export includes `tags.remove_coverage` for queued removals.

@@ -5,6 +5,7 @@ pub(super) struct Selection {
     rows: BTreeSet<usize>,
     anchor: Option<usize>,
     active: Option<usize>,
+    revision: u64,
 }
 
 impl Selection {
@@ -23,12 +24,14 @@ impl Selection {
                 .extend(visible[start.min(end)..=start.max(end)].iter().copied());
             self.anchor = Some(visible[start]);
             self.active = Some(row);
+            self.revision = self.revision.wrapping_add(1);
         } else if toggle {
             if !self.rows.remove(&row) {
                 self.rows.insert(row);
             }
             self.anchor = Some(row);
             self.active = Some(row);
+            self.revision = self.revision.wrapping_add(1);
         } else {
             self.single(row);
         }
@@ -39,10 +42,26 @@ impl Selection {
         self.rows.insert(row);
         self.active = Some(row);
         self.anchor = Some(row);
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub fn clear(&mut self) {
+        self.rows.clear();
+        self.active = None;
+        self.anchor = None;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn retain_visible(&mut self, visible: &[usize]) {
+        let count = self.rows.len();
         self.rows.retain(|row| visible.binary_search(row).is_ok());
+        if self.rows.len() != count {
+            self.revision = self.revision.wrapping_add(1);
+        }
         if self
             .anchor
             .is_some_and(|row| visible.binary_search(&row).is_err())
