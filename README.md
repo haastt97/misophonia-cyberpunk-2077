@@ -42,7 +42,7 @@ Place one `.archive` in `Cyberpunk 2077/archive/pc/mod/` and start the game. The
 
 ## Audio Review
 
-Use the local browser tool to listen to sounds, track candidates for future updates, and pick stand-ins by category. [Audio Review setup](tools/audio_review/README.md)
+Use the desktop program to listen to sounds, track candidates for future updates, and pick stand-ins by category. [Audio Review setup](tools/audio_review/README.md)
 
 ## Building the downloads
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+from concurrent.futures import CancelledError
 from dataclasses import asdict, dataclass
 import hashlib
 import io
@@ -15,6 +16,7 @@ import struct
 import subprocess
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from threading import BoundedSemaphore, Lock
+from time import monotonic
 from typing import BinaryIO
 
 
@@ -32,6 +34,35 @@ FILE_TYPES = (".wem", ".ogg", ".opus", ".wav", ".mp3", ".flac", ".bnk", ".opusin
 CATALOG_SCHEMA = 1
 CONVERSION_TIMEOUT = 180
 MAX_EXPANDED_SEGMENT = 512 * 1024 * 1024
+
+
+def check_cancelled(cancelled):
+    if cancelled is not None and cancelled.is_set():
+        raise CancelledError("Audio operation canceled.")
+
+
+def run_tool(command, cancelled, env=None):
+    check_cancelled(cancelled)
+    deadline = monotonic() + CONVERSION_TIMEOUT
+    with subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        errors="replace", env=env,
+    ) as process:
+        try:
+            while True:
+                check_cancelled(cancelled)
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f"{Path(command[0]).name} timed out.")
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
 
 
 @dataclass(frozen=True)
@@ -194,7 +225,7 @@ class GameAudio:
         self._preview_locks = tuple(Lock() for _ in range(32))
         self._conversion_slots = BoundedSemaphore(2)
 
-    def build(self) -> list[dict]:
+    def build(self, cancelled=None) -> list[dict]:
         archive_dir = self.game_dir / "archive" / "pc"
         paths = sorted(
             path
@@ -230,7 +261,8 @@ class GameAudio:
         if self.wolvenkit is None:
             raise ValueError("Set --wolvenkit to WolvenKit.CLI to index sound file names.")
 
-        rows = self._scan()
+        rows = self._scan(cancelled)
+        check_cancelled(cancelled)
         data = {
             "fingerprint": fingerprint,
             "warnings": self.warnings,
@@ -247,21 +279,17 @@ class GameAudio:
                 temp.unlink(missing_ok=True)
         return rows
 
-    def _paths(self, path: Path) -> dict[int, PureWindowsPath]:
+    def _paths(self, path: Path, cancelled) -> dict[int, PureWindowsPath]:
         env = os.environ.copy()
         local_dotnet = self.wolvenkit.parent.parent / "dotnet"
         if "DOTNET_ROOT" not in env and (local_dotnet / "shared").is_dir():
             env["DOTNET_ROOT"] = str(local_dotnet)
-        result = subprocess.run(
+        result = run_tool(
             [
                 self.wolvenkit, "archive", path, "--list", "--regex",
                 r"(?i)\.(wem|ogg|opus|wav|mp3|flac|bnk|opusinfo|opuspak)$",
             ],
-            env=env,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=CONVERSION_TIMEOUT,
+            cancelled, env=env,
         )
         if result.returncode or "[ERROR]" in result.stdout or "Exception" in result.stdout:
             message = (result.stderr or result.stdout).strip().splitlines()
@@ -275,7 +303,7 @@ class GameAudio:
                 paths.setdefault(resource_hash(name.lower()), file)
         return paths
 
-    def _scan(self) -> list[dict]:
+    def _scan(self, cancelled) -> list[dict]:
         rows = []
         self.warnings = []
         self._sources = {}
@@ -284,9 +312,10 @@ class GameAudio:
         banks = []
         for archive, path in self._archives.items():
             entries = archive_entries(path)
-            paths = self._paths(path)
+            paths = self._paths(path, cancelled)
             with path.open("rb") as stream:
                 for asset_hash, segment in sorted(entries.items(), key=lambda entry: entry[1].offset):
+                    check_cancelled(cancelled)
                     file = paths.get(asset_hash)
                     suffix = file.suffix.lower() if file else ""
                     if not suffix:
@@ -303,6 +332,7 @@ class GameAudio:
                         self._add_file(rows, archive, asset_hash, segment, file, suffix)
 
         for archive, asset_hash, segment, file in banks:
+            check_cancelled(cancelled)
             with self._archives[archive].open("rb") as stream:
                 if segment.stored == segment.size:
                     members = bank_members(stream, segment.offset, segment.size)
@@ -324,6 +354,7 @@ class GameAudio:
         for archive, info in infos:
             region = archive.split("/", 1)[0]
             for media, pack, start, length in opus_members(info):
+                check_cancelled(cancelled)
                 origin = archive if (archive, pack) in packs else by_region.get((region, pack))
                 origin = origin or by_region.get(("content", pack))
                 segment = packs.get((origin, pack))
@@ -418,7 +449,7 @@ class GameAudio:
             raise ValueError("WolvenKit could not decompress an audio archive segment")
         return output.raw[:segment.size]
 
-    def preview(self, row_id: str) -> Path:
+    def preview(self, row_id: str, cancelled=None) -> Path:
         source = self._sources.get(row_id)
         if source is None:
             raise KeyError(f"No indexed audio file named {row_id}")
@@ -430,9 +461,11 @@ class GameAudio:
         target = self._preview_dir / f"{row_id}{suffix}"
         lock = self._preview_locks[hash(row_id) % len(self._preview_locks)]
         with lock:
+            check_cancelled(cancelled)
             if target.is_file():
                 return target
             with self._conversion_slots, TemporaryDirectory(dir=self.cache_dir, prefix="preview-") as work:
+                check_cancelled(cancelled)
                 work = Path(work)
                 encoded = work / ("sound" + source.suffix)
                 with self._archives[source.archive].open("rb") as stream:
@@ -451,33 +484,28 @@ class GameAudio:
                 if source.suffix in native_formats:
                     encoded.replace(target)
                 else:
-                    self._decode_wem(work, encoded, target)
+                    self._decode_wem(work, encoded, target, cancelled)
         return target
 
-    def _decode_wem(self, work: Path, encoded: Path, target: Path) -> None:
+    def _decode_wem(self, work: Path, encoded: Path, target: Path, cancelled) -> None:
         if self.decoder is None:
             raise ValueError("Set --decoder to vgmstream-cli to preview Wwise WEM audio.")
         wav = work / "decoded.wav"
-        try:
-            self._run([self.decoder, "-i", "-D", "2", "-o", wav, encoded], wav, "vgmstream")
-            if self.ffmpeg:
-                ogg = work / "preview.ogg"
-                self._run(
-                    [self.ffmpeg, "-v", "error", "-nostdin", "-i", wav,
-                     "-c:a", "libopus", "-b:a", "112k", ogg],
-                    ogg, "FFmpeg",
-                )
-                ogg.replace(target)
-            else:
-                wav.replace(target)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("Audio conversion timed out") from exc
+        self._run([self.decoder, "-i", "-D", "2", "-o", wav, encoded], wav, "vgmstream", cancelled)
+        if self.ffmpeg:
+            ogg = work / "preview.ogg"
+            self._run(
+                [self.ffmpeg, "-v", "error", "-nostdin", "-i", wav,
+                 "-c:a", "libopus", "-b:a", "112k", ogg],
+                ogg, "FFmpeg", cancelled,
+            )
+            ogg.replace(target)
+        else:
+            wav.replace(target)
 
     @staticmethod
-    def _run(command: list, output: Path, tool: str) -> None:
-        result = subprocess.run(
-            command, capture_output=True, text=True, errors="replace", timeout=CONVERSION_TIMEOUT,
-        )
+    def _run(command: list, output: Path, tool: str, cancelled) -> None:
+        result = run_tool(command, cancelled)
         if result.returncode or not output.is_file() or output.stat().st_size <= 44:
             message = (result.stderr or result.stdout).strip().splitlines()
             raise RuntimeError(f"{tool} could not decode this sound: {' '.join(message[-4:])}")

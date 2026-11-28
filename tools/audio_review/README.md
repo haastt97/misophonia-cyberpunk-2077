@@ -1,15 +1,17 @@
 # Misophonia Audio Review
 
-Audio Review is a local browser tool for auditioning game audio and planning changes to Misophonia. It reads the installed Cyberpunk 2077 archives and the selected Misophonia source checkout.
+Audio Review is a native desktop program for auditioning game audio and planning changes to Misophonia. It reads the installed Cyberpunk 2077 archives and the selected Misophonia source checkout.
 
 ## Run
 
-Requirements are Python 3.10 or later, the local game installation, [WolvenKit CLI](https://github.com/WolvenKit/WolvenKit/releases), and [vgmstream-cli](https://github.com/vgmstream/vgmstream/releases). Make the executables available on your path or pass their full paths using `--wolvenkit` and `--decoder`. A standalone WolvenKit install may also need `DOTNET_ROOT`.
+Requirements are Python 3.10 or later, Qt for Python, the local game installation, [WolvenKit CLI](https://github.com/WolvenKit/WolvenKit/releases), and [vgmstream-cli](https://github.com/vgmstream/vgmstream/releases). Make the executables available on your path or pass their full paths using `--wolvenkit` and `--decoder`. A standalone WolvenKit install may also need `DOTNET_ROOT`.
 
-Run this command from the Misophonia source checkout and open the printed address in your browser.
+From the Misophonia source checkout, install the Qt dependency in a virtual environment and launch the window.
 
 ```sh
-python3 tools/audio_review/server.py --game "/path/to/Cyberpunk 2077"
+uv venv .venv-audio-review
+uv pip install --python .venv-audio-review/bin/python -r tools/audio_review/requirements.txt
+.venv-audio-review/bin/python tools/audio_review/desktop.py --game "/path/to/Cyberpunk 2077"
 ```
 
 The first run indexes the archives and caches the public event-to-media metadata from [Cyberpunk SoundDB](https://sounddb.zhincore.eu/). Supply `--event-index /path/to/events.json` to use a local copy. Use `--catalog /path/to/Misophonia` to show coverage from a different source checkout. Restart the tool after changing the game files or catalog.
@@ -28,4 +30,4 @@ Coverage is derived from the selected source. A configurable mute is available t
 
 ## Local files
 
-On Linux, review tags are saved in `~/.local/share/misophonia/audio-review/review.sqlite3` by default. Copy this database for a backup while the tool is stopped. The preview and index cache defaults to `~/.cache/misophonia/audio-review/`. Use `--data` and `--cache` to choose other locations. Preview audio is read from your installed game and stored locally.
+On Linux, review tags are saved in `~/.local/share/misophonia/audio-review/review.sqlite3` by default. Copy this database for a backup while the tool is stopped. The desktop and earlier browser versions use the same tag database. The preview and index cache defaults to `~/.cache/misophonia/audio-review/`. Use `--data` and `--cache` to choose other locations. Preview audio is read from your installed game and stored locally.

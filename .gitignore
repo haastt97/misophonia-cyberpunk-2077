@@ -1,5 +1,6 @@
 /dist/
 /work/
+/.venv-audio-review/
 *.archive
 *.zip
 *.7z

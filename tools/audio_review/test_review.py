@@ -1,10 +1,14 @@
 """Exercise persistence, category constraints, and catalog coverage."""
 
+from concurrent.futures import CancelledError
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
+from threading import Event, Timer
 import unittest
 
-from server import EMPTY_TAGS, Review, ReviewStore
+from game_audio import run_tool
+from review import EMPTY_TAGS, Review, ReviewStore
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,6 +78,14 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(row["kind"], "event")
         with self.assertRaisesRegex(ValueError, "installed audio"):
             self.write(row["id"], stand_in=True, stand_in_category="breathing")
+
+    def test_cancelling_an_active_converter_ends_the_process(self):
+        cancelled = Event()
+        timer = Timer(0.1, cancelled.set)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with self.assertRaises(CancelledError):
+            run_tool([sys.executable, "-c", "import time; time.sleep(5)"], cancelled)
 
 
 if __name__ == "__main__":
