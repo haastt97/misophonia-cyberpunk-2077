@@ -4,22 +4,6 @@ use eframe::egui;
 
 use crate::{catalog::Category, review::Review};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Choice<'a> {
-    Clear,
-    Section(&'a str),
-    Subcategory { id: &'a str, section: &'a str },
-}
-
-impl<'a> Choice<'a> {
-    fn subcategory(category: &'a Category) -> Self {
-        Self::Subcategory {
-            id: &category.id,
-            section: &category.section,
-        }
-    }
-}
-
 struct CategorySearch {
     words: Vec<String>,
 }
@@ -51,85 +35,78 @@ impl CategorySearch {
     }
 }
 
-fn subcategory_choices<'a>(
-    categories: &'a [Category],
-    section: Option<&str>,
-    search: &CategorySearch,
-) -> Vec<(Choice<'a>, String)> {
-    let scope = section.filter(|_| search.is_empty());
-    categories
-        .iter()
-        .filter(|category| {
-            scope.is_none_or(|name| category.section == name)
-                && search.matches(&category.section, &category.name)
-        })
-        .map(|category| {
-            let label = if scope.is_some() {
-                category.name.clone()
-            } else {
-                format!("{} / {}", category.section, category.name)
-            };
-            (Choice::subcategory(category), label)
-        })
-        .collect()
+fn category_path(category: &Category) -> String {
+    format!("{} / {}", category.section, category.name)
 }
 
-fn searchable_combo<'a>(
-    ui: &mut egui::Ui,
-    salt: impl std::hash::Hash + Copy,
-    label: &str,
-    width: f32,
-    selected: Choice<'a>,
-    options: impl FnOnce(&CategorySearch) -> Vec<(Choice<'a>, String)>,
-) -> (egui::Response, Option<Choice<'a>>) {
-    let combo_id = ui.make_persistent_id(egui::Id::new(salt));
-    let was_open = egui::ComboBox::is_open(ui.ctx(), combo_id);
-    let enabled = ui.is_enabled();
-    let search_id = combo_id.with("query");
-    let mut query: String = if was_open {
-        ui.data(|data| data.get_temp(search_id)).unwrap_or_default()
-    } else {
-        String::new()
-    };
+#[derive(Clone, Default)]
+struct LookupState {
+    query: String,
+    open: bool,
+}
 
-    let response = egui::ComboBox::from_id_salt(salt)
-        .selected_text(label)
-        .truncate()
-        .width(width)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show_ui(ui, |ui| {
-            if !enabled {
-                return None;
-            }
-            let search_box = ui.add(
-                egui::TextEdit::singleline(&mut query)
-                    .desired_width(width)
-                    .hint_text("Search categories…"),
-            );
-            if !was_open {
-                search_box.request_focus();
-            }
-            let search = CategorySearch::new(&query);
-            let items = options(&search);
-            if items.is_empty() {
-                ui.weak("No matches");
-            }
-            let enter = !search.is_empty()
-                && (search_box.has_focus() || search_box.lost_focus())
-                && ui.input(|input| input.key_pressed(egui::Key::Enter));
-            for (index, (choice, label)) in items.into_iter().enumerate() {
-                if ui.selectable_label(choice == selected, label).clicked() || (enter && index == 0)
-                {
-                    ui.close();
-                    return Some(choice);
-                }
-            }
-            None
-        });
-    if response.inner.is_some() {
-        ui.data_mut(|data| data.insert_temp(search_id, query));
+fn category_lookup<'a>(
+    ui: &mut egui::Ui,
+    id: &str,
+    width: f32,
+    categories: &'a [Category],
+) -> Option<&'a Category> {
+    let id = ui.make_persistent_id((id, "category-search"));
+    let mut state: LookupState = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut state.query)
+            .id(id)
+            .desired_width(width)
+            .hint_text("Search categories…"),
+    );
+    let query = CategorySearch::new(&state.query);
+    let tabbed_away = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
+    if !field.enabled() || query.is_empty() || tabbed_away {
+        state.open = false;
+    } else if field.changed() || field.clicked() || field.gained_focus() {
+        state.open = true;
     }
-    (response.response, response.inner.flatten())
+    let enter = (field.has_focus() || field.lost_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let choice = egui::Popup::from_response(&field)
+        .open_bool(&mut state.open)
+        .width(field.rect.width())
+        .close_behavior(if field.clicked() {
+            egui::PopupCloseBehavior::IgnoreClicks
+        } else {
+            egui::PopupCloseBehavior::CloseOnClickOutside
+        })
+        .show(|ui| {
+            egui::ScrollArea::vertical()
+                .max_height(210.)
+                .show(ui, |ui| {
+                    let mut matches = categories
+                        .iter()
+                        .filter(|category| query.matches(&category.section, &category.name))
+                        .peekable();
+                    if matches.peek().is_none() {
+                        ui.weak("No matches");
+                    }
+                    for (index, category) in matches.enumerate() {
+                        if ui
+                            .selectable_label(false, category_path(category))
+                            .clicked()
+                            || (enter && index == 0)
+                        {
+                            return Some(category);
+                        }
+                    }
+                    None
+                })
+                .inner
+        })
+        .and_then(|response| response.inner);
+    if choice.is_some() {
+        state.query.clear();
+        state.open = false;
+    }
+    ui.data_mut(|data| data.insert_temp(id, state));
+    choice
 }
 
 pub fn filter_picker(
@@ -137,28 +114,38 @@ pub fn filter_picker(
     value: &mut Option<String>,
     categories: &[Category],
 ) -> egui::Response {
+    if let Some(category) = category_lookup(ui, "filter", 133., categories) {
+        *value = Some(category.id.clone());
+    }
     let chosen = categories
         .iter()
         .find(|category| Some(&category.id) == value.as_ref());
-    let title = chosen.map_or_else(
-        || "All".to_owned(),
-        |category| format!("{} / {}", category.section, category.name),
-    );
-    let selected = chosen.map_or(Choice::Clear, Choice::subcategory);
-    let (response, choice) =
-        searchable_combo(ui, "filter-category", &title, 150., selected, |search| {
-            let mut options = subcategory_choices(categories, None, search);
-            if search.is_empty() {
-                options.insert(0, (Choice::Clear, "All".to_owned()));
-            }
-            options
-        });
-    match choice {
-        Some(Choice::Subcategory { id, .. }) => *value = Some(id.to_owned()),
-        Some(Choice::Clear) => *value = None,
-        _ => (),
-    }
-    response
+    let title = chosen.map_or_else(|| "All".to_owned(), category_path);
+    ui.allocate_ui_with_layout(
+        egui::vec2(150., ui.spacing().interact_size.y),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            egui::ComboBox::from_id_salt("filter-category")
+                .selected_text(&title)
+                .truncate()
+                .width(150.)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(value, None, "All");
+                    for category in categories {
+                        ui.selectable_value(
+                            value,
+                            Some(category.id.clone()),
+                            category_path(category),
+                        );
+                    }
+                })
+                .response
+        },
+    )
+    .inner
+    .on_hover_text(format!(
+        "{title}\nAll sounds and Outside the mod keep files with no linked mod coverage visible."
+    ))
 }
 
 pub fn split_picker(
@@ -196,42 +183,26 @@ pub fn split_picker(
         _ => assigned_section,
     };
     let old = value.clone();
-    let selected = section.as_deref().map_or(Choice::Clear, Choice::Section);
-    let (_, choice) = searchable_combo(
-        ui,
-        (id, "category"),
-        section.as_deref().unwrap_or("Choose category"),
-        width,
-        selected,
-        |search| {
-            let mut options: Vec<_> = sections
-                .iter()
-                .filter(|section| search.matches(section, ""))
-                .map(|&section| (Choice::Section(section), section.to_owned()))
-                .collect();
-            if search.is_empty() {
-                options.insert(0, (Choice::Clear, "Choose category".to_owned()));
-            } else {
-                options.extend(subcategory_choices(categories, None, search));
-            }
-            options
-        },
-    );
-    match choice {
-        Some(Choice::Clear) => {
-            *value = None;
-            section = None;
-        }
-        Some(Choice::Section(name)) => section = Some(name.to_owned()),
-        Some(Choice::Subcategory {
-            id,
-            section: parent,
-        }) => {
-            *value = Some(id.to_owned());
-            section = Some(parent.to_owned());
-        }
-        None => (),
+
+    if let Some(category) = category_lookup(ui, id, width, categories) {
+        *value = Some(category.id.clone());
+        section = Some(category.section.clone());
     }
+    egui::ComboBox::from_id_salt((id, "category"))
+        .selected_text(section.as_deref().unwrap_or("Choose category"))
+        .truncate()
+        .width(width)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_value(&mut section, None, "Choose category")
+                .clicked()
+            {
+                *value = None;
+            }
+            for name in sections {
+                ui.selectable_value(&mut section, Some(name.to_owned()), name);
+            }
+        });
 
     let chosen =
         find_category(value).filter(|category| Some(&category.section) == section.as_ref());
@@ -243,25 +214,21 @@ pub fn split_picker(
         },
         |category| category.name.as_str(),
     );
-    let selected = chosen.map_or(Choice::Clear, Choice::subcategory);
-    let (_, choice) = searchable_combo(ui, (id, "subcategory"), title, width, selected, |search| {
-        let mut options = subcategory_choices(categories, section.as_deref(), search);
-        if search.is_empty() {
-            options.insert(0, (Choice::Clear, "Choose subcategory".to_owned()));
-        }
-        options
+    ui.add_enabled_ui(section.is_some(), |ui| {
+        egui::ComboBox::from_id_salt((id, "subcategory"))
+            .selected_text(title)
+            .truncate()
+            .width(width)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(value, None, "Choose subcategory");
+                for category in categories
+                    .iter()
+                    .filter(|category| Some(&category.section) == section.as_ref())
+                {
+                    ui.selectable_value(value, Some(category.id.clone()), &category.name);
+                }
+            });
     });
-    match choice {
-        Some(Choice::Clear) => *value = None,
-        Some(Choice::Subcategory {
-            id,
-            section: parent,
-        }) => {
-            *value = Some(id.to_owned());
-            section = Some(parent.to_owned());
-        }
-        _ => (),
-    }
     ui.data_mut(|data| data.insert_temp(memory, (value.clone(), find_section(value), section)));
     *value != old
 }
@@ -479,28 +446,26 @@ mod tests {
                 mode: "mute",
             },
         ];
-        let labels = |scope, query| {
-            subcategory_choices(&categories, scope, &CategorySearch::new(query))
-                .into_iter()
-                .map(|(_, label)| label)
+        let labels = |text| {
+            let query = CategorySearch::new(text);
+            categories
+                .iter()
+                .filter(|category| query.matches(&category.section, &category.name))
+                .map(category_path)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(labels(Some("Environment"), ""), ["Paper pages", "Water"]);
         assert_eq!(
-            labels(Some("Environment"), " PAPER "),
+            labels(" PAPER "),
             [
                 "Repetitive / Paper and Plastic",
                 "Environment / Paper pages"
             ]
         );
+        assert_eq!(labels("paper repet"), ["Repetitive / Paper and Plastic"]);
         assert_eq!(
-            labels(None, "paper repet"),
+            labels("Repetitive / Paper"),
             ["Repetitive / Paper and Plastic"]
         );
-        assert_eq!(
-            labels(None, "Repetitive / Paper"),
-            ["Repetitive / Paper and Plastic"]
-        );
-        assert!(labels(None, "paper water").is_empty());
+        assert!(labels("paper water").is_empty());
     }
 }

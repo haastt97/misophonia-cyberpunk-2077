@@ -176,7 +176,7 @@ impl Desktop {
         });
         ui.add_space(6.);
         let previous = self.filters.clone();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.filters.query)
                     .desired_width(260.)
@@ -193,8 +193,7 @@ impl Desktop {
                 })
                 .response
                 .on_hover_text("Filter by mod coverage or review tag");
-            filter_picker(ui, &mut self.filters.category, &review.categories)
-                .on_hover_text("Category filter. All sounds and Outside the mod keep files with no linked mod coverage visible.");
+            filter_picker(ui, &mut self.filters.category, &review.categories);
             egui::ComboBox::from_id_salt("kind-filter")
                 .selected_text(
                     self.filters
