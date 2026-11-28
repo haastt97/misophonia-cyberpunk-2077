@@ -41,7 +41,11 @@ The build applies decisions to named game events. Several clips can share one ev
 
 ## Saved data
 
-On Linux, the default tag database is `~/.local/share/misophonia/audio-review/review.sqlite3`. The Rust version uses the same database and keeps all saved review tags and choices. The index cache defaults to `~/.cache/misophonia/audio-review/`. The Rust version reuses the existing archive index and creates its own preview cache on demand. Use `--data` and `--cache` to select other directories.
+Use **Project → Save project** to name your work and **Open project…** to switch between saved `.misophonia.json` files. Each project includes your trigger and stand-in tags, replacements, coverage removals, and category edits. **New project** starts with the base catalog and an empty review. Pending changes are saved before switching.
+
+By default, Audio Review autosaves changed projects every minute. Use **Project → Settings…** to enter a different number of minutes. Named projects autosave to their own files. Untitled projects get recovery files under **Project → Open autosave…**. If you reopen an older project against a different mod catalog, the app displays both catalog versions.
+
+The active workspace also persists as you edit and is reopened at startup. On Linux it defaults to `~/.local/share/misophonia/audio-review/review.sqlite3`, with untitled recovery files in the adjacent `autosaves/` folder. The index cache defaults to `~/.cache/misophonia/audio-review/`. Use `--data` and `--cache` to select other directories.
 
 ## Tests
 

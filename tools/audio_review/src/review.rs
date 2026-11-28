@@ -1,14 +1,18 @@
+mod projects;
+
+use projects::ProjectState;
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::{BufWriter, Write},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     catalog::{Catalog, Category, MediaEvents, Sound},
@@ -68,14 +72,14 @@ pub fn kind_label(kind: &str) -> &str {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Tags {
     pub candidate: bool,
     pub category: Option<String>,
     pub stand_in: bool,
     pub stand_in_category: Option<String>,
     pub replacement: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remove_coverage: bool,
 }
 
@@ -100,6 +104,12 @@ fn read_tags(row: &Row<'_>, first: usize) -> rusqlite::Result<Tags> {
 }
 
 struct Store(Connection);
+
+struct Workspace {
+    categories: CategoryEdits,
+    tags: BTreeMap<String, Tags>,
+    project: ProjectState,
+}
 
 impl Store {
     fn open(path: &Path) -> Result<Self> {
@@ -127,12 +137,13 @@ impl Store {
                 "ALTER TABLE tags ADD COLUMN remove_coverage INTEGER NOT NULL DEFAULT 0;",
             )?;
         }
+        ProjectState::initialize(&schema)?;
         schema.commit()?;
         Ok(Self(db))
     }
 
-    fn entries(&self) -> Result<BTreeMap<String, Tags>> {
-        let mut stmt = self.0.prepare(
+    fn entries(db: &Connection) -> Result<BTreeMap<String, Tags>> {
+        let mut stmt = db.prepare(
             "SELECT id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage FROM tags",
         )?;
         let entries = stmt.query_map([], |row| Ok((row.get(0)?, read_tags(row, 1)?)))?;
@@ -154,28 +165,59 @@ impl Store {
         Ok(entries.collect::<rusqlite::Result<_>>()?)
     }
 
-    fn snapshot(&self) -> Result<(CategoryEdits, BTreeMap<String, Tags>)> {
+    fn snapshot(&self) -> Result<Workspace> {
         let snapshot = self.0.unchecked_transaction()?;
-        let categories = Self::categories(&snapshot)?;
-        let tags = self.entries()?;
+        let workspace = Workspace {
+            categories: Self::categories(&snapshot)?,
+            tags: Self::entries(&snapshot)?,
+            project: ProjectState::read(&snapshot)?,
+        };
         snapshot.commit()?;
-        Ok((categories, tags))
+        Ok(workspace)
     }
 
-    fn edit_categories(&mut self, expected: &CategoryEdits, edits: &CategoryEdits) -> Result<()> {
+    fn write_category(db: &Connection, id: &str, edit: &CategoryEdit) -> Result<()> {
+        db.execute(
+            "INSERT INTO category_edits (id, section, name, removed) VALUES (?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET section = excluded.section, name = excluded.name, removed = excluded.removed",
+            params![id, edit.section, edit.name, edit.removed],
+        )?;
+        Ok(())
+    }
+
+    fn write_tags(db: &Connection, id: &str, tags: &Tags) -> Result<()> {
+        if tags.candidate || tags.stand_in || tags.remove_coverage {
+            db.execute(
+                "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET candidate = excluded.candidate,
+                    category = excluded.category, stand_in = excluded.stand_in,
+                    stand_in_category = excluded.stand_in_category, replacement = excluded.replacement,
+                    remove_coverage = excluded.remove_coverage",
+                params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement, tags.remove_coverage],
+            )?;
+        } else {
+            db.execute("DELETE FROM tags WHERE id = ?", [id])?;
+        }
+        Ok(())
+    }
+
+    fn edit_categories(
+        &mut self,
+        expected_epoch: i64,
+        expected: &CategoryEdits,
+        edits: &CategoryEdits,
+    ) -> Result<()> {
         let db = self
             .0
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ProjectState::current(&db, expected_epoch)?;
         ensure!(
             &Self::categories(&db)? == expected,
             "Categories changed in another window. Review the refreshed categories and try again"
         );
         for (id, edit) in edits {
-            db.execute(
-                "INSERT INTO category_edits (id, section, name, removed) VALUES (?, ?, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET section = excluded.section, name = excluded.name, removed = excluded.removed",
-                params![id, edit.section, edit.name, edit.removed],
-            )?;
+            Self::write_category(&db, id, edit)?;
             if edit.removed {
                 db.execute(
                     "UPDATE tags SET replacement = NULL
@@ -192,18 +234,21 @@ impl Store {
                 )?;
             }
         }
+        ProjectState::mark_dirty(&db)?;
         db.commit()?;
         Ok(())
     }
 
     fn save_many(
         &mut self,
+        expected_epoch: i64,
         categories: &CategoryEdits,
         edits: &[(&str, &Tags, &Tags)],
     ) -> Result<usize> {
         let db = self
             .0
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ProjectState::current(&db, expected_epoch)?;
         ensure!(
             &Self::categories(&db)? == categories,
             "Categories changed in another window. Review the refreshed categories and try again"
@@ -217,19 +262,7 @@ impl Store {
                 &current == *expected,
                 "A selected sound changed in another window. Review the refreshed tags and try again"
             );
-            if tags.candidate || tags.stand_in || tags.remove_coverage {
-                db.execute(
-                    "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                     ON CONFLICT(id) DO UPDATE SET candidate = excluded.candidate,
-                        category = excluded.category, stand_in = excluded.stand_in,
-                        stand_in_category = excluded.stand_in_category, replacement = excluded.replacement,
-                        remove_coverage = excluded.remove_coverage",
-                    params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement, tags.remove_coverage],
-                )?;
-            } else {
-                db.execute("DELETE FROM tags WHERE id = ?", [id])?;
-            }
+            Self::write_tags(&db, id, tags)?;
         }
         for (_, expected, tags) in edits {
             if tags.replacement == expected.replacement && tags.category == expected.category {
@@ -261,6 +294,9 @@ impl Store {
                 params![id, donor_category, donor_category],
             )?;
         }
+        if !edits.is_empty() {
+            ProjectState::mark_dirty(&db)?;
+        }
         db.commit()?;
         Ok(reset)
     }
@@ -282,6 +318,8 @@ pub struct Review {
     search: Vec<String>,
     tags: BTreeMap<String, Tags>,
     store: Store,
+    project: ProjectState,
+    data_dir: PathBuf,
 }
 
 impl Review {
@@ -338,20 +376,22 @@ impl Review {
 
         fs::create_dir_all(data).with_context(|| format!("Create {}", data.display()))?;
         let store = Store::open(&data.join("review.sqlite3"))?;
-        let (category_edits, tags) = store.snapshot()?;
-        let categories = review_categories::effective(&catalog.categories, &category_edits);
+        let snapshot = store.snapshot()?;
+        let categories = review_categories::effective(&catalog.categories, &snapshot.categories);
         review_categories::validate(&categories)?;
         Ok(Self {
             catalog,
             categories,
-            category_edits,
+            category_edits: snapshot.categories,
             media_events: media.clone(),
             sounds,
             kinds,
             audio_count,
             by_id,
             search,
-            tags,
+            tags: snapshot.tags,
+            project: snapshot.project,
+            data_dir: data.canonicalize()?,
             store,
         })
     }
@@ -429,7 +469,9 @@ impl Review {
             self.validate_tags(id, tags)?;
             rows.push((id.as_str(), self.tags.get(id).unwrap_or(&EMPTY_TAGS), tags));
         }
-        let result = self.store.save_many(&self.category_edits, &rows);
+        let result = self
+            .store
+            .save_many(self.project.epoch, &self.category_edits, &rows);
         self.refresh_saved_review()?;
         result
     }
@@ -552,28 +594,40 @@ impl Review {
         proposed.extend(changes.clone());
         let categories = review_categories::effective(&self.catalog.categories, &proposed);
         review_categories::validate(&categories)?;
-        let result = self.store.edit_categories(&self.category_edits, &changes);
+        let result = self
+            .store
+            .edit_categories(self.project.epoch, &self.category_edits, &changes);
         self.refresh_saved_review()?;
         result
     }
 
     fn refresh_saved_review(&mut self) -> Result<()> {
-        let (edits, tags) = self.store.snapshot()?;
-        if self.category_edits != edits {
-            self.categories = review_categories::effective(&self.catalog.categories, &edits);
-            self.category_edits = edits;
+        let snapshot = self.store.snapshot()?;
+        ensure!(
+            snapshot.project.epoch == self.project.epoch,
+            "Another window switched projects. Reopen Audio Review to continue with the active project"
+        );
+        if self.category_edits != snapshot.categories {
+            self.categories =
+                review_categories::effective(&self.catalog.categories, &snapshot.categories);
+            self.category_edits = snapshot.categories;
         }
-        self.tags = tags;
+        self.tags = snapshot.tags;
+        self.project = snapshot.project;
         Ok(())
     }
 
     pub(crate) fn saved_tags(&self) -> Result<BTreeMap<String, Tags>> {
-        let (categories, tags) = self.store.snapshot()?;
+        let workspace = self.store.snapshot()?;
         ensure!(
-            categories == self.category_edits,
+            workspace.project.epoch == self.project.epoch,
+            "Another window switched projects. Reopen Audio Review to continue with the active project"
+        );
+        ensure!(
+            workspace.categories == self.category_edits,
             "Categories changed in another window. Reopen Audio Review to load them"
         );
-        Ok(tags)
+        Ok(workspace.tags)
     }
 
     fn export(&self) -> Result<serde_json::Value> {

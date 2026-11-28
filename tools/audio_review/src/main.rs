@@ -8,6 +8,7 @@ mod job;
 mod package_build;
 mod package_ui;
 mod player;
+mod project_ui;
 mod review;
 mod review_categories;
 mod standalone;

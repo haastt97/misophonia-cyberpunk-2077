@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::Category;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CategoryEdit {
     pub section: String,
     pub name: String,

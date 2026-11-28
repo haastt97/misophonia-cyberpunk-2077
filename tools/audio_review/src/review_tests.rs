@@ -356,3 +356,198 @@ fn export_checks_that_tags_and_categories_use_the_same_snapshot() -> Result<()> 
     );
     Ok(())
 }
+
+#[test]
+fn named_projects_round_trip_independent_review_edits() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let key = review.add_category("Personal", "Paper")?;
+    review.save_many(vec![
+        ("donor".into(), donor(&key)),
+        ("trigger".into(), candidate(&key, Some("donor"))),
+        (
+            "screen".into(),
+            Tags {
+                remove_coverage: true,
+                ..Tags::default()
+            },
+        ),
+    ])?;
+    let first = review.save_project(Some(&dir.path().join("First pass")))?;
+    assert!(first.ends_with("First pass.misophonia.json"));
+    review.edit_category(&key, "Personal", "Paper swaps")?;
+    review.new_project()?;
+    assert!(review.project_path().is_none());
+    assert!(review.category(&key).is_none());
+    assert_eq!(review.tags("trigger"), &Tags::default());
+
+    review.save("screen", donor("screenPercent"))?;
+    let second = review.save_project(Some(&dir.path().join("Second.misophonia.json")))?;
+    review.open_project(&first)?;
+    assert_eq!(review.project_path(), Some(first.as_path()));
+    assert_eq!(review.category(&key).unwrap().name, "Paper swaps");
+    assert_eq!(review.tags("trigger"), &candidate(&key, Some("donor")));
+    assert!(review.tags("screen").remove_coverage);
+    drop(review);
+
+    let mut reopened = setup(dir.path())?;
+    assert_eq!(reopened.project_path(), Some(first.as_path()));
+    assert_eq!(reopened.tags("trigger"), &candidate(&key, Some("donor")));
+    reopened.open_project(&second)?;
+    assert_eq!(reopened.project_path(), Some(second.as_path()));
+    assert!(reopened.category(&key).is_none());
+    assert_eq!(reopened.tags("trigger"), &Tags::default());
+    assert_eq!(reopened.tags("screen"), &donor("screenPercent"));
+    Ok(())
+}
+
+#[test]
+fn untitled_work_autosaves_to_separate_recovery_points() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    assert_eq!(review.autosave_minutes(), 1);
+    assert!(review.set_autosave_minutes(0).is_err());
+    review.set_autosave_minutes(3)?;
+    assert_eq!(review.autosave()?, None);
+    review.save("donor", candidate("food", None))?;
+
+    // The live workspace still opens with the edit before the first timer tick.
+    drop(review);
+    let mut review = setup(dir.path())?;
+    assert_eq!(review.autosave_minutes(), 3);
+    assert!(review.tags("donor").candidate);
+    let one = review.autosave()?.unwrap();
+    assert!(one.starts_with(review.autosave_directory()));
+    assert_eq!(review.autosave()?, None);
+    review.new_project()?;
+    review.save("screen", donor("screenPercent"))?;
+    let two = review.autosave()?.unwrap();
+    assert_ne!(one, two);
+    review.open_project(&one)?;
+    assert!(review.project_path().is_none());
+    assert!(review.tags("donor").candidate);
+    assert_eq!(review.tags("screen"), &Tags::default());
+    review.open_project(&two)?;
+    assert_eq!(review.tags("donor"), &Tags::default());
+    assert!(review.tags("screen").stand_in);
+    Ok(())
+}
+
+#[test]
+fn failed_open_and_external_file_changes_leave_current_work_intact() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    review.save("donor", donor("food"))?;
+    let first = review.save_project(Some(&dir.path().join("First")))?;
+    review.save("trigger", candidate("food", Some("donor")))?;
+
+    let broken = dir.path().join("unrelated.json");
+    fs::write(&broken, b"{\"schema_version\":1,\"sounds\":[]}")?;
+    assert!(review.open_project(&broken).is_err());
+    assert!(review.save_project(Some(&broken)).is_err());
+    assert_eq!(fs::read(&broken)?, b"{\"schema_version\":1,\"sounds\":[]}");
+
+    fs::write(&first, b"external change")?;
+    assert!(review.autosave().is_err());
+    assert!(review.new_project().is_err());
+    assert_eq!(fs::read(&first)?, b"external change");
+    assert_eq!(review.tags("trigger"), &candidate("food", Some("donor")));
+    let copy = review.save_project(Some(&dir.path().join("First recovered")))?;
+    review.new_project()?;
+    review.open_project(&copy)?;
+    assert_eq!(review.tags("trigger"), &candidate("food", Some("donor")));
+    Ok(())
+}
+
+#[test]
+fn stale_windows_cannot_edit_or_autosave_a_different_project() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut first = setup(dir.path())?;
+    let mut stale = setup(dir.path())?;
+    first.new_project()?;
+    assert!(stale.save("donor", donor("food")).is_err());
+    assert!(stale.autosave().is_err());
+    assert!(stale.export().is_err());
+    assert_eq!(setup(dir.path())?.tags("donor"), &Tags::default());
+    Ok(())
+}
+
+#[test]
+fn save_as_cannot_redirect_other_windows_to_a_different_project() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut writer = setup(dir.path())?;
+    let first = writer.save_project(Some(&dir.path().join("First")))?;
+    let mut other = setup(dir.path())?;
+    assert_eq!(other.project_path(), Some(first.as_path()));
+    writer.save("donor", donor("food"))?;
+    let second = writer.save_project(Some(&dir.path().join("Second")))?;
+    assert_eq!(writer.project_path(), Some(second.as_path()));
+    assert!(other.save("screen", donor("screenPercent")).is_err());
+    assert!(other.autosave().is_err());
+    assert!(other.export().is_err());
+    assert_eq!(setup(dir.path())?.tags("screen"), &Tags::default());
+    Ok(())
+}
+
+#[test]
+fn recovered_workspace_uses_its_own_file_and_keeps_old_autosaves() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    review.save("donor", donor("food"))?;
+    let first = review.autosave()?.unwrap();
+    let first_bytes = fs::read(&first)?;
+    drop(review);
+    // A fresh database can reuse an epoch, while older autosaves remain on disk.
+    fs::remove_file(dir.path().join("review.sqlite3"))?;
+    let mut review = setup(dir.path())?;
+    review.save("screen", donor("screenPercent"))?;
+    let second = review.autosave()?.unwrap();
+    assert_ne!(first, second);
+    assert_eq!(fs::read(first)?, first_bytes);
+    review.save("donor", donor("food"))?;
+    assert_eq!(review.autosave()?.unwrap(), second);
+    Ok(())
+}
+
+#[test]
+fn projects_keep_their_original_catalog_version_and_filename_case() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let original = review.save_project(Some(&dir.path().join("Example.JSON")))?;
+    assert!(original.ends_with("Example.JSON"));
+    let mut previous: serde_json::Value = serde_json::from_slice(&fs::read(&original)?)?;
+    previous["catalog_version"] = "0.1.0".into();
+    fs::write(&original, serde_json::to_vec(&previous)?)?;
+    review.open_project(&original)?;
+    assert!(review.project_catalog_notice().unwrap().contains("0.1.0"));
+    review.save("donor", donor("food"))?;
+    assert_eq!(review.autosave()?.unwrap(), original);
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&original)?)?;
+    assert_eq!(saved["catalog_version"], "0.1.0");
+    Ok(())
+}
+
+#[test]
+fn separate_workspaces_cannot_both_replace_the_same_saved_revision() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut first = setup(&dir.path().join("first"))?;
+    let path = first.save_project(Some(&dir.path().join("Shared")))?;
+    let mut second = setup(&dir.path().join("second"))?;
+    second.open_project(&path)?;
+    first.save("donor", donor("food"))?;
+    second.save("screen", donor("screenPercent"))?;
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let first_barrier = barrier.clone();
+    let first = std::thread::spawn(move || {
+        first_barrier.wait();
+        first.autosave().is_ok()
+    });
+    let second = std::thread::spawn(move || {
+        barrier.wait();
+        second.autosave().is_ok()
+    });
+    assert_ne!(first.join().unwrap(), second.join().unwrap());
+    let data: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    assert_eq!(data["tags"].as_object().unwrap().len(), 1);
+    Ok(())
+}

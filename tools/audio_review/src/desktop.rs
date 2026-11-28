@@ -636,6 +636,13 @@ impl eframe::App for Desktop {
                 if !self.warning.is_empty() {
                     ui.colored_label(RED, &self.warning);
                 }
+                if let Some(message) = self
+                    .library
+                    .as_ref()
+                    .and_then(|library| library.review.project_catalog_notice())
+                {
+                    ui.colored_label(egui::Color32::LIGHT_YELLOW, message);
+                }
             }
         });
         if let Some(library) = &self.library {
