@@ -49,9 +49,9 @@ impl View {
             Self::All => true,
             Self::Covered => !sound.coverage.is_empty(),
             Self::Outside => sound.playable && sound.coverage.is_empty(),
-            Self::Candidates => tags.candidate,
+            Self::Candidates => tags.candidate || tags.remove_coverage,
             Self::StandIns => tags.stand_in,
-            Self::Untagged => !tags.candidate && !tags.stand_in,
+            Self::Untagged => !tags.candidate && !tags.stand_in && !tags.remove_coverage,
         }
     }
 }
@@ -74,6 +74,8 @@ pub struct Tags {
     pub stand_in: bool,
     pub stand_in_category: Option<String>,
     pub replacement: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remove_coverage: bool,
 }
 
 static EMPTY_TAGS: Tags = Tags {
@@ -82,6 +84,7 @@ static EMPTY_TAGS: Tags = Tags {
     stand_in: false,
     stand_in_category: None,
     replacement: None,
+    remove_coverage: false,
 };
 
 fn read_tags(row: &Row<'_>, first: usize) -> rusqlite::Result<Tags> {
@@ -91,6 +94,7 @@ fn read_tags(row: &Row<'_>, first: usize) -> rusqlite::Result<Tags> {
         stand_in: row.get(first + 2)?,
         stand_in_category: row.get(first + 3)?,
         replacement: row.get(first + 4)?,
+        remove_coverage: row.get(first + 5)?,
     })
 }
 
@@ -98,21 +102,34 @@ struct Store(Connection);
 
 impl Store {
     fn open(path: &Path) -> Result<Self> {
-        let db = Connection::open(path).with_context(|| format!("Open {}", path.display()))?;
+        let mut db = Connection::open(path).with_context(|| format!("Open {}", path.display()))?;
         db.busy_timeout(Duration::from_secs(5))?;
-        db.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             CREATE TABLE IF NOT EXISTS tags (
+        db.execute_batch("PRAGMA journal_mode=WAL;")?;
+        let schema = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        schema.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tags (
                 id TEXT PRIMARY KEY, candidate INTEGER NOT NULL, category TEXT,
-                stand_in INTEGER NOT NULL, stand_in_category TEXT, replacement TEXT
+                stand_in INTEGER NOT NULL, stand_in_category TEXT, replacement TEXT,
+                remove_coverage INTEGER NOT NULL DEFAULT 0
              );",
         )?;
+        let has_removal_flag = schema.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('tags') WHERE name = 'remove_coverage')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !has_removal_flag {
+            schema.execute_batch(
+                "ALTER TABLE tags ADD COLUMN remove_coverage INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
+        schema.commit()?;
         Ok(Self(db))
     }
 
     fn entries(&self) -> Result<BTreeMap<String, Tags>> {
         let mut stmt = self.0.prepare(
-            "SELECT id, candidate, category, stand_in, stand_in_category, replacement FROM tags",
+            "SELECT id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage FROM tags",
         )?;
         let entries = stmt.query_map([], |row| Ok((row.get(0)?, read_tags(row, 1)?)))?;
         Ok(entries.collect::<rusqlite::Result<_>>()?)
@@ -123,7 +140,7 @@ impl Store {
             .0
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = db.query_row(
-            "SELECT candidate, category, stand_in, stand_in_category, replacement FROM tags WHERE id = ?",
+            "SELECT candidate, category, stand_in, stand_in_category, replacement, remove_coverage FROM tags WHERE id = ?",
             [id], |row| read_tags(row, 0),
         ).optional()?.unwrap_or_default();
         ensure!(
@@ -143,14 +160,15 @@ impl Store {
                 "Choose a stand-in from the same category"
             );
         }
-        if tags.candidate || tags.stand_in {
+        if tags.candidate || tags.stand_in || tags.remove_coverage {
             db.execute(
-                "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement)
-                 VALUES (?, ?, ?, ?, ?, ?)
+                "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET candidate = excluded.candidate,
                     category = excluded.category, stand_in = excluded.stand_in,
-                    stand_in_category = excluded.stand_in_category, replacement = excluded.replacement",
-                params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement],
+                    stand_in_category = excluded.stand_in_category, replacement = excluded.replacement,
+                    remove_coverage = excluded.remove_coverage",
+                params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement, tags.remove_coverage],
             )?;
         } else {
             db.execute("DELETE FROM tags WHERE id = ?", [id])?;
@@ -347,6 +365,12 @@ impl Review {
             );
         }
         let expected = self.tags.get(id).unwrap_or(&EMPTY_TAGS);
+        ensure!(
+            !tags.remove_coverage
+                || expected.remove_coverage
+                || !self.sounds[index].coverage.is_empty(),
+            "Only sounds with mod coverage can be marked for removal"
+        );
         let result = self.store.save(id, expected, &tags);
         self.tags = self.store.entries()?;
         result

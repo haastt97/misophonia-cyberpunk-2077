@@ -17,6 +17,7 @@ const TRIGGER: Color32 = Color32::from_rgb(62, 40, 45);
 const STAND_IN: Color32 = Color32::from_rgb(35, 57, 46);
 const RED: Color32 = Color32::from_rgb(243, 145, 153);
 const GREEN: Color32 = Color32::from_rgb(136, 207, 160);
+const TAG_GRAY: Color32 = Color32::from_gray(153);
 
 pub struct Desktop {
     loading: Option<Job<Library>>,
@@ -249,6 +250,8 @@ impl Desktop {
                     let index = self.visible[row.index()];
                     let sound = &review.sounds[index];
                     let tags = review.tags(&sound.asset.id);
+                    let covered = !sound.coverage.is_empty();
+                    let removal_action = covered || tags.remove_coverage;
                     let active = self.player.action(index);
                     let (name_tint, coverage_tint) = tints(tags);
                     row.set_selected(self.selected == Some(index));
@@ -272,9 +275,15 @@ impl Desktop {
                     });
                     row.col(|ui| {
                         tint_cell(ui, name_tint);
+                        let mut name = RichText::new(&sound.asset.name);
+                        if covered {
+                            name = name.color(RED);
+                        } else if tags.stand_in {
+                            name = name.color(GREEN);
+                        }
                         let response = ui
                             .add(
-                                egui::Label::new(&sound.asset.name)
+                                egui::Label::new(name)
                                     .truncate()
                                     .sense(egui::Sense::click()),
                             )
@@ -290,6 +299,9 @@ impl Desktop {
                     row.col(|ui| {
                         tint_cell(ui, coverage_tint);
                         let mut labels = Vec::new();
+                        if tags.remove_coverage {
+                            labels.push("Removal candidate".to_owned());
+                        }
                         for coverage in &sound.coverage {
                             let name =
                                 category_name(&review.catalog.categories, &coverage.category);
@@ -326,11 +338,21 @@ impl Desktop {
                                 if tag_button(
                                     ui,
                                     "X",
-                                    RED,
+                                    if removal_action { TAG_GRAY } else { RED },
                                     TRIGGER,
-                                    tags.candidate,
+                                    if removal_action {
+                                        tags.remove_coverage
+                                    } else {
+                                        tags.candidate
+                                    },
                                     true,
-                                    "Tag trigger candidate",
+                                    if tags.remove_coverage {
+                                        "Clear coverage removal candidate"
+                                    } else if covered {
+                                        "Mark for removal from mod coverage"
+                                    } else {
+                                        "Tag trigger candidate"
+                                    },
                                 ) {
                                     action = Some(RowAction::Candidate(index));
                                 }
@@ -344,11 +366,15 @@ impl Desktop {
                                 if tag_button(
                                     ui,
                                     "O",
-                                    GREEN,
+                                    if tags.stand_in { TAG_GRAY } else { GREEN },
                                     STAND_IN,
                                     tags.stand_in,
                                     sound.playable,
-                                    "Tag stand-in",
+                                    if tags.stand_in {
+                                        "Remove stand-in tag"
+                                    } else {
+                                        "Tag stand-in"
+                                    },
                                 ) {
                                     action = Some(RowAction::StandIn(index));
                                 }
@@ -378,18 +404,20 @@ impl Desktop {
                 ctx.request_repaint();
             }
             RowAction::Candidate(index) | RowAction::StandIn(index) => {
-                let mut tags = library
-                    .review
-                    .tags(&library.review.sounds[index].asset.id)
-                    .clone();
+                let sound = &library.review.sounds[index];
+                let mut tags = library.review.tags(&sound.asset.id).clone();
                 if matches!(action, RowAction::Candidate(_)) {
-                    tags.candidate = !tags.candidate;
-                    tags.category = if tags.candidate {
-                        tags.stand_in_category.clone()
+                    if !sound.coverage.is_empty() || tags.remove_coverage {
+                        tags.remove_coverage = !tags.remove_coverage;
                     } else {
-                        None
-                    };
-                    tags.replacement = None;
+                        tags.candidate = !tags.candidate;
+                        tags.category = if tags.candidate {
+                            tags.stand_in_category.clone()
+                        } else {
+                            None
+                        };
+                        tags.replacement = None;
+                    }
                 } else {
                     tags.stand_in = !tags.stand_in;
                     tags.stand_in_category = if tags.stand_in {
@@ -567,6 +595,20 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
         if sound.coverage.is_empty() {
             ui.weak("No linked mod coverage");
         }
+        if tags.remove_coverage {
+            ui.colored_label(RED, "Candidate for removal from mod coverage");
+        }
+        if tags.stand_in {
+            ui.colored_label(GREEN, "Stand-in");
+        }
+        if tags.candidate
+            && (!sound.coverage.is_empty() || tags.remove_coverage)
+            && ui.button("Clear trigger candidate").clicked()
+        {
+            tags.candidate = false;
+            tags.category = None;
+            tags.replacement = None;
+        }
         ui.separator();
 
         ui.label("Candidate category");
@@ -680,7 +722,7 @@ fn category_name<'a>(categories: &'a [Category], key: &'a str) -> &'a str {
 }
 
 fn tints(tags: &Tags) -> (Option<Color32>, Option<Color32>) {
-    let name = if tags.candidate {
+    let name = if tags.candidate || tags.remove_coverage {
         Some(TRIGGER)
     } else if tags.stand_in {
         Some(STAND_IN)

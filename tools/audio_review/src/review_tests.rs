@@ -221,3 +221,54 @@ fn library_category_keeps_sounds_outside_the_mod_visible() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn coverage_removal_candidates_persist_separately_from_trigger_tags() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let screen = review.index("screen").unwrap();
+    let removal = Tags {
+        remove_coverage: true,
+        ..Tags::default()
+    };
+
+    assert!(review.save("donor", removal.clone()).is_err());
+    review.save("screen", removal.clone())?;
+    drop(review);
+    let mut review = setup(dir.path())?;
+    assert_eq!(review.tags("screen"), &removal);
+    assert_eq!(
+        review.filter("", View::Candidates, Some("screenPercent"), None),
+        vec![screen]
+    );
+    assert!(
+        review
+            .filter("", View::Covered, None, None)
+            .contains(&screen)
+    );
+    assert!(
+        !review
+            .filter("", View::Untagged, None, None)
+            .contains(&screen)
+    );
+    let export = review.export()?;
+    let queued = &export["sounds"][0];
+    assert_eq!(queued["id"], "screen");
+    assert_eq!(queued["tags"]["candidate"], false);
+    assert_eq!(queued["tags"]["remove_coverage"], true);
+    assert!(!queued["coverage"].as_array().unwrap().is_empty());
+
+    let mut both = donor("screenPercent");
+    both.remove_coverage = true;
+    review.save("screen", both)?;
+    review.save("screen", donor("screenPercent"))?;
+    let reopened = setup(dir.path())?;
+    assert_eq!(reopened.tags("screen"), &donor("screenPercent"));
+    assert!(reopened.filter("", View::Candidates, None, None).is_empty());
+    assert!(
+        reopened.export()?["sounds"][0]["tags"]
+            .get("remove_coverage")
+            .is_none()
+    );
+    Ok(())
+}

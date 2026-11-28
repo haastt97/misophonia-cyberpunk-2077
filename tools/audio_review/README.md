@@ -25,7 +25,8 @@ The library includes packed effects, complete embedded soundbank clips, streamed
 - The category dropdown starts on **All**. In the library, choosing a category narrows sounds with mod coverage and keeps files outside the mod visible. In **Candidates** and **Stand-ins**, it filters your review queue.
 - Use **Play** in a row to preview a clip. The shared player also supports pause, seeking, and preview volume.
 - Select **X** to tag a trigger candidate and tint its row red. Then choose the relevant mod category.
-- Select **O** to tag a potential stand-in and tint its row green. Choose its stand-in category. A trigger candidate can use a different sound tagged **O** in the same category. **Mute (default)** is available for every candidate.
+- Sounds with mod coverage have red names. Click their grey **X** to queue or clear a removal candidate in the review. The export includes `tags.remove_coverage` for queued removals.
+- Select **O** to tag a potential stand-in and tint its row green. Click the grey **O** on a stand-in to untag it. Choose a stand-in category if you want candidates in that category to use it. **Mute (default)** is available for every trigger candidate.
 - Use **Export review** to save tagged sounds, categories, replacement choices, and linked events as JSON.
 
 Coverage comes from the selected catalog. The configurable build supplies mute toggles and a **Screens** volume slider. The corresponding standalone archive uses a fixed mute. **Event only** identifies an existing control whose event has no linked installed clip in the SoundDB index.
