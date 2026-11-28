@@ -13,3 +13,4 @@ __pycache__/
 .env
 .env.*
 *.pem
+/tools/audio_review/target/

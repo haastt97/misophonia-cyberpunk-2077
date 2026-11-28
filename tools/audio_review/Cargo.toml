@@ -1,0 +1,28 @@
+[package]
+name = "misophonia-audio-review"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+byteorder = "1"
+clap = { version = "4", features = ["derive"] }
+eframe = { version = "0.33", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+egui_extras = "0.33"
+libloading = "0.8"
+regex = "1"
+rfd = { version = "0.15", default-features = false, features = ["async-std", "xdg-portal"] }
+rodio = { version = "0.21", default-features = false, features = ["playback", "wav", "mp3", "flac", "vorbis"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tempfile = "3"
+ureq = "3"
+which = "8"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+hound = "3.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["fs"] }

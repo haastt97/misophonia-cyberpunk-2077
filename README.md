@@ -40,6 +40,10 @@ Place one `.archive` in `Cyberpunk 2077/archive/pc/mod/` and start the game. The
 | Graphic Sound Effects | 44 |
 | Screens | 243 identified TV and advert events |
 
+## Audio Review
+
+Use the desktop program to listen to sounds, track candidates for future updates, and pick stand-ins by category. [Audio Review setup](tools/audio_review/README.md)
+
 ## Building the downloads
 
 The [runtime scripts](r6/scripts/Misophonia/) contain the Mod Settings UI and the catalog of sound events. The [standalone Screens list](data/screen-events.txt) contains the named TV and advert events used by the fixed archives. Files generated from game assets are built from a local copy of the game.
