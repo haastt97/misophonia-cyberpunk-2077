@@ -19,7 +19,7 @@ QPushButton#standIn:checked { color: #e5ffeb; background: #264b37; border-color:
 QPushButton#standIn:disabled { color: #858b86; }
 QPushButton#playActive { border-color: #e1b96d; color: #f6d899; }
 QTableWidget, QListWidget { border: 1px solid #39403f; border-radius: 5px; }
-QTableWidget { alternate-background-color: #232727; selection-background-color: #394642; }
+QTableWidget { alternate-background-color: #232727; }
 QHeaderView::section { background: #262b2a; padding: 7px; border: 0; color: #c5cbc2; }
 QTableWidget::item { padding: 0 7px; }
 QSlider::groove:horizontal { height: 5px; background: #4a5250; }

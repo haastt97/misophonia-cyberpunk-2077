@@ -20,10 +20,10 @@ The library includes packed sound effects, complete embedded soundbank clips, st
 
 ## Review sounds
 
-- Search by filename, media ID, or linked event name. Use the filters to narrow by source, review status, and mod category.
+- Search by filename, media ID, or linked event name. Choose **All sounds** to browse the full library or **Outside the mod** to see installed audio with no linked Misophonia setting.
 - Use **Play** to decode a preview on demand. Pause it from the row or the shared player.
-- Click the red **X** to mark a future mute or replacement candidate. Then choose a mod category.
-- Click the green **O** to mark a potential stand-in and assign its stand-in category. Candidates can select a different sound tagged **O** in their own category. **Mute** is the default.
+- Click the red **X** to mark a future mute or replacement candidate and tint its row red. Then choose a mod category.
+- Click the green **O** to mark a potential stand-in and tint its row green. Assign its stand-in category. Candidates can select a different sound tagged **O** in their own category. **Mute** is the default.
 - **Export review** saves your tagged files, candidate categories, replacements, and linked events as JSON. It contains planning data for future mod updates.
 
 Coverage is derived from the selected source. A configurable mute is available through its switch and starts off on a fresh install. **Screens** is a volume slider in the configurable build and a fixed mute in applicable standalone archives. Coverage follows known event-to-media links. An **Event only** row records an existing control where the index has no linked installed file.

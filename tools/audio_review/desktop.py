@@ -10,26 +10,24 @@ import sqlite3
 import sys
 
 from PySide6.QtCore import QIODevice, QSaveFile, QSignalBlocker, QThreadPool, QTimer, Qt, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow,
-    QProgressBar, QPushButton, QSizePolicy, QSlider, QSplitter, QTableWidget, QTableWidgetItem,
+    QProgressBar, QPushButton, QSizePolicy, QSlider, QSplitter, QStyledItemDelegate, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from catalog import event_media
 from game_audio import GameAudio
 from player import Job, Preview
-from review import Review, ReviewStore
+from review import FILTERS, Review, ReviewStore
 
 HERE = Path(__file__).resolve().parent
 PAGE_SIZE = 40
-FILTERS = {
-    "All sounds": "all", "Candidates": "candidate", "Stand-ins": "stand-in",
-    "In the mod": "covered", "Untagged": "untagged",
-}
 STYLE = (HERE / "desktop.qss").read_text(encoding="utf-8")
+TRIGGER_TINT = QColor("#38282b")
+STAND_IN_TINT = QColor("#26392f")
 
 
 def argument_parser():
@@ -102,6 +100,14 @@ class FittedLabel(QLabel):
         super().setText(text)
 
 
+class TagTintDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        tint = index.data(Qt.ItemDataRole.BackgroundRole)
+        if tint is not None:
+            option.palette.setColor(QPalette.ColorRole.Highlight, tint.color().lighter(128))
+
+
 class ReviewWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -145,9 +151,15 @@ class ReviewWindow(QMainWindow):
         self.query.setPlaceholderText("Search sound, event, or media ID")
         self.query.setAccessibleName("Search sounds")
         self.query.setClearButtonEnabled(True)
-        self.view = dropdown("Review status")
-        for label, key in FILTERS.items():
+        self.view = dropdown("Filter by coverage or review tag")
+        self.view.setMinimumContentsLength(16)
+        for key, label in FILTERS.items():
             self.view.addItem(label, key)
+        self.view.setItemData(
+            self.view.findData("outside"),
+            "Installed audio files with no linked mute or volume setting in this mod catalog.",
+            Qt.ItemDataRole.ToolTipRole,
+        )
         self.category = dropdown("Filter by category")
         self.category.addItem("All categories", "")
         self.kind = dropdown("Filter by sound type")
@@ -172,6 +184,12 @@ class ReviewWindow(QMainWindow):
         self.table = QTableWidget(0, 5)
         self.table.setAccessibleName("Sound library")
         self.table.setHorizontalHeaderLabels(["Preview", "Sound", "Mod coverage", "X", "O"])
+        self.table.horizontalHeaderItem(3).setToolTip("Red tint identifies a trigger candidate.")
+        self.table.horizontalHeaderItem(4).setToolTip("Green tint identifies a stand-in candidate.")
+        palette = self.table.palette()
+        palette.setColor(QPalette.ColorRole.Highlight, QColor("#394642"))
+        self.table.setPalette(palette)
+        self.table.setItemDelegate(TagTintDelegate(self.table))
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -346,20 +364,23 @@ class ReviewWindow(QMainWindow):
             if row["id"] == keep:
                 selected = index
             key = row["id"]
+            tags = row["tags"]
+            name_tint = TRIGGER_TINT if tags["candidate"] else (STAND_IN_TINT if tags["stand_in"] else None)
+            coverage_tint = STAND_IN_TINT if tags["stand_in"] else name_tint
             play = self.row_button(index, 0, "▷", f"Play {row['name']}",
                                    partial(self.preview.toggle, row), enabled=row["playable"])
             self.row_players[key] = (play, row["name"], row["playable"])
-            self.set_cell(index, 1, row["name"], row.get("path", row["detail"]))
+            self.set_cell(index, 1, row["name"], row.get("path", row["detail"]), tint=name_tint)
             coverage = list(dict.fromkeys(
                 f"{self.categories[item['category']]['name']} · {'slider' if item['mode'] == 'volume' else 'mute'}"
                 for item in row["coverage"]
             ))
-            self.set_cell(index, 2, " / ".join(coverage) if coverage else "—")
+            self.set_cell(index, 2, " / ".join(coverage) if coverage else "—", tint=coverage_tint)
             self.row_button(index, 3, "X", f"Candidate tag for {row['name']}",
-                            partial(self.toggle_tag, row, "candidate"), checked=row["tags"]["candidate"],
+                            partial(self.toggle_tag, row, "candidate"), checked=tags["candidate"],
                             name="candidate")
             self.row_button(index, 4, "O", f"Stand-in tag for {row['name']}",
-                            partial(self.toggle_tag, row, "stand_in"), checked=row["tags"]["stand_in"],
+                            partial(self.toggle_tag, row, "stand_in"), checked=tags["stand_in"],
                             enabled=row["playable"], name="standIn")
         if self.items:
             self.table.selectRow(selected)
@@ -378,9 +399,11 @@ class ReviewWindow(QMainWindow):
         self.table.setCellWidget(index, column, button)
         return button
 
-    def set_cell(self, row, column, value, tooltip=None):
+    def set_cell(self, row, column, value, tooltip=None, *, tint=None):
         cell = QTableWidgetItem(value)
         cell.setToolTip(tooltip or value)
+        if tint is not None:
+            cell.setBackground(tint)
         self.table.setItem(row, column, cell)
 
     def select_current(self):

@@ -70,6 +70,14 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in results["items"]], ["trigger"])
         self.assertEqual(results["items"][0]["tags"], EMPTY_TAGS)
 
+    def test_outside_the_mod_includes_uncovered_files_regardless_of_tags(self):
+        self.write("donor", stand_in=True, stand_in_category="food")
+        outside = self.review.list_sounds("", "outside", "", "", 0, 40)
+        self.assertEqual(outside["total"], 1)
+        self.assertEqual(outside["items"][0]["id"], "donor")
+        self.assertTrue(outside["items"][0]["tags"]["stand_in"])
+        self.assertEqual(self.review.list_sounds("", "outside", "", "event", 0, 40)["total"], 0)
+
     def test_unlinked_covered_events_are_visible_and_unplayable(self):
         results = self.review.list_sounds("", "covered", "breathing", "event", 0, 1)
         self.assertGreater(results["total"], 1)

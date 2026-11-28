@@ -12,9 +12,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
     from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPalette
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QFileDialog
-    from desktop import ReviewWindow, STYLE, set_value
+    from PySide6.QtWidgets import QApplication, QFileDialog, QStyleOptionViewItem
+    from desktop import ReviewWindow, STAND_IN_TINT, STYLE, TRIGGER_TINT, set_value
 except ModuleNotFoundError as error:
     if not error.name.startswith("PySide6"):
         raise
@@ -58,9 +59,10 @@ class DesktopTests(unittest.TestCase):
     def open_review(self):
         assets = [
             {"id": "donor", "name": "Gentle sample", "kind": "sfx", "detail": "Test audio"},
-            {"id": "candidate", "name": "Trigger sample", "kind": "sfx", "detail": "Test audio"},
+            {"id": "candidate", "name": "Trigger sample", "kind": "sfx", "detail": "Test audio", "media_id": 42},
         ]
-        return Review(SampleGame(self.clip), assets, ROOT, {}, ReviewStore(self.database))
+        return Review(SampleGame(self.clip), assets, ROOT,
+                      {42: {"cmn_generic_male_eat_chrunchy"}}, ReviewStore(self.database))
 
     def click_tag(self, sound_id, column):
         index = next(i for i, row in enumerate(self.window.items) if row["id"] == sound_id)
@@ -91,6 +93,23 @@ class DesktopTests(unittest.TestCase):
         with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "JSON")):
             QTest.mouseClick(self.window.export_button, Qt.MouseButton.LeftButton)
         self.assertEqual(json.loads(destination.read_bytes())["sounds"][0]["id"], "candidate")
+
+    def test_outside_filter_and_tag_colors(self):
+        win = self.window
+        set_value(win.view, "outside")
+        self.assertEqual(win.view.currentText(), "Outside the mod")
+        self.assertEqual([row["id"] for row in win.items], ["donor"])
+        self.click_tag("donor", 4)
+        self.assertEqual(win.table.item(0, 1).background().color(), STAND_IN_TINT)
+        self.assertEqual(win.table.item(0, 2).background().color(), STAND_IN_TINT)
+        self.click_tag("donor", 3)
+        self.assertEqual(win.table.item(0, 1).background().color(), TRIGGER_TINT)
+        self.assertEqual(win.table.item(0, 2).background().color(), STAND_IN_TINT)
+        option = QStyleOptionViewItem()
+        win.table.itemDelegate().initStyleOption(option, win.table.model().index(0, 1))
+        self.assertEqual(option.palette.color(QPalette.ColorRole.Highlight), TRIGGER_TINT.lighter(128))
+        set_value(win.view, "all")
+        self.assertEqual({row["id"] for row in win.items}, {"candidate", "donor"})
 
     def test_preview_uses_a_local_file_and_toggles_pause(self):
         win = self.window

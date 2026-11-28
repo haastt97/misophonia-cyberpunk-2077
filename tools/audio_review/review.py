@@ -11,7 +11,14 @@ KINDS = {
     "sfx": "Sound effects", "sound": "Streamed sounds", "voice": "Voice-over",
     "music": "Music", "event": "Event only",
 }
-FILTERS = {"all", "candidate", "stand-in", "covered", "untagged"}
+FILTERS = {
+    "all": "All sounds",
+    "covered": "In the mod",
+    "outside": "Outside the mod",
+    "candidate": "Candidates",
+    "stand-in": "Stand-ins",
+    "untagged": "Untagged",
+}
 EMPTY_TAGS = {
     "candidate": False, "category": None, "stand_in": False, "stand_in_category": None, "replacement": None,
 }
@@ -126,6 +133,8 @@ class Review:
             if tag_filter == "stand-in" and not tags["stand_in"]:
                 continue
             if tag_filter == "covered" and not row["coverage"]:
+                continue
+            if tag_filter == "outside" and (row["coverage"] or not row["playable"]):
                 continue
             if tag_filter == "untagged" and (tags["candidate"] or tags["stand_in"]):
                 continue
