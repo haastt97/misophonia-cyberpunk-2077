@@ -268,6 +268,7 @@ impl Review {
     ) -> Vec<usize> {
         let query = normalized(query);
         let words: Vec<_> = query.split_whitespace().collect();
+        let keep_outside = matches!(view, View::All | View::Outside | View::Untagged);
         self.sounds
             .iter()
             .zip(&self.search)
@@ -277,7 +278,8 @@ impl Review {
                 let matches = kind.is_none_or(|kind| kind == sound.asset.kind)
                     && view.matches(sound, tags)
                     && category.is_none_or(|category| {
-                        tags.category.as_deref() == Some(category)
+                        (keep_outside && sound.playable && sound.coverage.is_empty())
+                            || tags.category.as_deref() == Some(category)
                             || tags.stand_in_category.as_deref() == Some(category)
                             || sound
                                 .coverage

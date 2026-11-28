@@ -22,6 +22,7 @@ The library includes packed effects, complete embedded soundbank clips, streamed
 ## Review sounds
 
 - Search by filename, media ID, or linked event. Use **All sounds** for the full library and **Outside the mod** for installed files with no linked Misophonia setting.
+- The category dropdown starts on **All**. In the library, choosing a category narrows sounds with mod coverage and keeps files outside the mod visible. In **Candidates** and **Stand-ins**, it filters your review queue.
 - Use **Play** in a row to preview a clip. The shared player also supports pause, seeking, and preview volume.
 - Select **X** to tag a trigger candidate and tint its row red. Then choose the relevant mod category.
 - Select **O** to tag a potential stand-in and tint its row green. Choose its stand-in category. A trigger candidate can use a different sound tagged **O** in the same category. **Mute (default)** is available for every candidate.

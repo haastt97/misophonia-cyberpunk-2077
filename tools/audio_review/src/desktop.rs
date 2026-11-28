@@ -164,11 +164,12 @@ impl Desktop {
             categories(
                 ui,
                 "filter-category",
-                "All categories",
+                "All",
                 &mut self.filters.category,
                 &review.catalog.categories,
                 150.,
-            );
+            )
+            .on_hover_text("Category filter. All sounds and Outside the mod keep files with no linked mod coverage visible.");
             egui::ComboBox::from_id_salt("kind-filter")
                 .selected_text(
                     self.filters
@@ -577,7 +578,9 @@ fn inspector(ui: &mut egui::Ui, review: &Review, index: usize) -> Option<Tags> {
                 &mut tags.category,
                 categories_list,
                 ui.available_width() - 12.,
-            ) {
+            )
+            .changed()
+            {
                 tags.replacement = None;
             }
         });
@@ -637,7 +640,7 @@ fn categories(
     value: &mut Option<String>,
     categories: &[Category],
     width: f32,
-) -> bool {
+) -> egui::Response {
     let label = value
         .as_deref()
         .and_then(|id| categories.iter().find(|item| item.id == id))
@@ -646,7 +649,7 @@ fn categories(
             |item| format!("{} / {}", item.section, item.name),
         );
     let mut changed = false;
-    egui::ComboBox::from_id_salt(id)
+    let mut response = egui::ComboBox::from_id_salt(id)
         .selected_text(label)
         .truncate()
         .width(width)
@@ -661,8 +664,12 @@ fn categories(
                     )
                     .changed();
             }
-        });
-    changed
+        })
+        .response;
+    if changed {
+        response.mark_changed();
+    }
+    response
 }
 
 fn category_name<'a>(categories: &'a [Category], key: &'a str) -> &'a str {

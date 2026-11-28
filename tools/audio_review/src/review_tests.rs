@@ -178,3 +178,46 @@ fn concurrent_windows_do_not_overwrite_newer_tags() -> Result<()> {
     assert_eq!(setup(dir.path())?.tags("donor"), &tags);
     Ok(())
 }
+
+#[test]
+fn library_category_keeps_sounds_outside_the_mod_visible() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let outside = review.index("donor").unwrap();
+    let eating = review.index("trigger").unwrap();
+    let screen = review.index("screen").unwrap();
+
+    assert_eq!(
+        review.filter("", View::default(), None, None).len(),
+        review.sounds.len()
+    );
+    let general = review.filter("", View::All, Some("screenPercent"), None);
+    assert!(general.contains(&screen));
+    assert!(general.contains(&outside));
+    assert!(!general.contains(&eating));
+    assert_eq!(
+        review.filter("Tone", View::Outside, Some("screenPercent"), Some("sfx")),
+        vec![outside]
+    );
+
+    review.save("donor", candidate("food", None))?;
+    assert!(
+        review
+            .filter("", View::All, Some("screenPercent"), None)
+            .contains(&outside)
+    );
+    assert_eq!(
+        review.filter("", View::Outside, Some("screenPercent"), None),
+        vec![outside]
+    );
+    assert_eq!(
+        review.filter("", View::Candidates, Some("food"), None),
+        vec![outside]
+    );
+    assert!(
+        review
+            .filter("", View::Candidates, Some("screenPercent"), None)
+            .is_empty()
+    );
+    Ok(())
+}
