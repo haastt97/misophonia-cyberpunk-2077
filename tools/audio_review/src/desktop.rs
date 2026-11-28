@@ -25,7 +25,6 @@ pub struct Desktop {
     filters: Filters,
     visible: Vec<usize>,
     selected: Option<usize>,
-    scroll_to_top: bool,
     warning: String,
     status: Option<(String, bool)>,
 }
@@ -71,7 +70,6 @@ impl Desktop {
             filters: Filters::default(),
             visible: Vec::new(),
             selected: None,
-            scroll_to_top: false,
             warning: String::new(),
             status: None,
         }
@@ -191,7 +189,6 @@ impl Desktop {
                 });
         });
         if previous != self.filters {
-            self.scroll_to_top = true;
             self.refresh();
         }
         if export {
@@ -226,7 +223,7 @@ impl Desktop {
             ui.centered_and_justified(|ui| ui.weak("No matching sounds"));
             return None;
         }
-        let mut table = TableBuilder::new(ui)
+        TableBuilder::new(ui)
             .striped(true)
             .sense(egui::Sense::click())
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -238,11 +235,7 @@ impl Desktop {
                     .resizable(true)
                     .clip(true),
             )
-            .columns(Column::exact(35.), 2);
-        if std::mem::take(&mut self.scroll_to_top) {
-            table = table.scroll_to_row(0, Some(egui::Align::TOP));
-        }
-        table
+            .columns(Column::exact(35.), 2)
             .header(27., |mut row| {
                 for label in ["Audio", "Sound", "Mod coverage", "X", "O"] {
                     row.col(|ui| {
