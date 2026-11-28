@@ -1,33 +1,40 @@
 # Misophonia Audio Review
 
-Audio Review is a native desktop program for auditioning game audio and planning changes to Misophonia. It reads the installed Cyberpunk 2077 archives and the selected Misophonia source checkout.
+Audio Review is a native Rust desktop program for previewing installed Cyberpunk 2077 sounds and planning changes to Misophonia. It runs independently of the game.
 
-## Run
+## Build and run
 
-Requirements are Python 3.10 or later, Qt for Python, the local game installation, [WolvenKit CLI](https://github.com/WolvenKit/WolvenKit/releases), and [vgmstream-cli](https://github.com/vgmstream/vgmstream/releases). Make the executables available on your path or pass their full paths using `--wolvenkit` and `--decoder`. A standalone WolvenKit install may also need `DOTNET_ROOT`.
+Use a stable Rust toolchain with Cargo, a C linker and, on Linux, pkg-config, ALSA development headers (`alsa-lib-devel` on Fedora), and a Wayland or X11 desktop with OpenGL. Linux export uses the desktop's XDG file chooser portal.
 
-From the Misophonia source checkout, install the Qt dependency in a virtual environment and launch the window.
+Install [WolvenKit CLI](https://github.com/WolvenKit/WolvenKit/releases) for archive indexing and [vgmstream-cli](https://github.com/vgmstream/vgmstream/releases) for Wwise and packed Opus previews. Put the tools on your path or use `--wolvenkit` and `--decoder` to pass their paths. WolvenKit may require `DOTNET_ROOT` for a standalone .NET install. If vgmstream is unavailable, FFmpeg can decode Ogg and Opus previews.
+
+From the Misophonia source checkout, build and open the window.
 
 ```sh
-uv venv .venv-audio-review
-uv pip install --python .venv-audio-review/bin/python -r tools/audio_review/requirements.txt
-.venv-audio-review/bin/python tools/audio_review/desktop.py --game "/path/to/Cyberpunk 2077"
+cargo run --release --locked --manifest-path tools/audio_review/Cargo.toml -- \
+  --game "/path/to/Cyberpunk 2077"
 ```
 
-The first run indexes the archives and caches the public event-to-media metadata from [Cyberpunk SoundDB](https://sounddb.zhincore.eu/). Supply `--event-index /path/to/events.json` to use a local copy. Use `--catalog /path/to/Misophonia` to show coverage from a different source checkout. Restart the tool after changing the game files or catalog.
+The built executable is `tools/audio_review/target/release/misophonia-audio-review`. Use `--catalog /path/to/Misophonia` to select a specific source checkout and `--event-index /path/to/events.json` to use local event metadata. The first run without a local copy downloads and caches the public event-to-media index from [Cyberpunk SoundDB](https://sounddb.zhincore.eu/). Restart after updating the game or catalog.
 
-The library includes packed sound effects, complete embedded soundbank clips, streamed audio, and installed voice languages from the base game and Phantom Liberty. The previews play individual recorded files. Game events can select several files, mix them, or change their playback in the game.
+The library includes packed effects, complete embedded soundbank clips, streamed audio, and installed voice languages from the base game and Phantom Liberty. In-game events can mix multiple clips or change how they play.
 
 ## Review sounds
 
-- Search by filename, media ID, or linked event name. Choose **All sounds** to browse the full library or **Outside the mod** to see installed audio with no linked Misophonia setting.
-- Use **Play** to decode a preview on demand. Pause it from the row or the shared player.
-- Click the red **X** to mark a future mute or replacement candidate and tint its row red. Then choose a mod category.
-- Click the green **O** to mark a potential stand-in and tint its row green. Assign its stand-in category. Candidates can select a different sound tagged **O** in their own category. **Mute** is the default.
-- **Export review** saves your tagged files, candidate categories, replacements, and linked events as JSON. It contains planning data for future mod updates.
+- Search by filename, media ID, or linked event. Use **All sounds** for the full library and **Outside the mod** for installed files with no linked Misophonia setting.
+- Use **Play** in a row to preview a clip. The shared player also supports pause, seeking, and preview volume.
+- Select **X** to tag a trigger candidate and tint its row red. Then choose the relevant mod category.
+- Select **O** to tag a potential stand-in and tint its row green. Choose its stand-in category. A trigger candidate can use a different sound tagged **O** in the same category. **Mute (default)** is available for every candidate.
+- Use **Export review** to save tagged sounds, categories, replacement choices, and linked events as JSON.
 
-Coverage is derived from the selected source. A configurable mute is available through its switch and starts off on a fresh install. **Screens** is a volume slider in the configurable build and a fixed mute in applicable standalone archives. Coverage follows known event-to-media links. An **Event only** row records an existing control where the index has no linked installed file.
+Coverage comes from the selected catalog. The configurable build supplies mute toggles and a **Screens** volume slider. The corresponding standalone archive uses a fixed mute. **Event only** identifies an existing control whose event has no linked installed clip in the SoundDB index.
 
-## Local files
+## Saved data
 
-On Linux, review tags are saved in `~/.local/share/misophonia/audio-review/review.sqlite3` by default. Copy this database for a backup while the tool is stopped. The desktop and earlier browser versions use the same tag database. The preview and index cache defaults to `~/.cache/misophonia/audio-review/`. Use `--data` and `--cache` to choose other locations. Preview audio is read from your installed game and stored locally.
+On Linux, the default tag database is `~/.local/share/misophonia/audio-review/review.sqlite3`. The Rust version uses the same database and keeps all saved review tags and choices. The index cache defaults to `~/.cache/misophonia/audio-review/`. The Rust version reuses the existing archive index and creates its own preview cache on demand. Use `--data` and `--cache` to select other directories.
+
+## Tests
+
+```sh
+cargo test --release --locked --manifest-path tools/audio_review/Cargo.toml
+```

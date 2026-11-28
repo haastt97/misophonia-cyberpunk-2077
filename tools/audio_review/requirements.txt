@@ -1,1 +1,0 @@
-PySide6-Addons>=6.8,<7
