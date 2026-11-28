@@ -98,7 +98,7 @@ impl Player {
         }
     }
 
-    fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         if let Some(job) = self.pending.take() {
             job.cancel();
             self.retired.push(job);

@@ -16,9 +16,18 @@ pub struct PackageDialog {
     destination: Option<PathBuf>,
     running: Option<Job<BuiltPackage>>,
     result: Option<Result<BuiltPackage, String>>,
+    previous_project: bool,
 }
 
 impl PackageDialog {
+    pub(crate) fn project_changed(&mut self) {
+        if self.running.is_none() {
+            *self = Self::default();
+        } else {
+            self.previous_project = true;
+        }
+    }
+
     pub fn open(&mut self, base: &str) {
         if self.name.is_empty() {
             self.name = format!("{base}-custom");
@@ -30,6 +39,10 @@ impl PackageDialog {
         if let Some(result) = self.running.as_ref().and_then(Job::poll) {
             self.running = None;
             self.result = Some(result.map_err(|error| format!("{error:#}")));
+            if self.previous_project {
+                self.name = format!("{}-custom", library.review.catalog.version);
+                self.destination = None;
+            }
             self.open = true;
         }
         if !self.open {
@@ -41,6 +54,7 @@ impl PackageDialog {
             destination,
             running,
             result,
+            previous_project,
         } = self;
         egui::Window::new("Build custom mod")
             .open(open)
@@ -74,6 +88,7 @@ impl PackageDialog {
                         match preparation {
                             Ok((plan, version)) => {
                                 *result = None;
+                                *previous_project = false;
                                 let source = library.package_source.clone();
                                 let game = Arc::clone(&library.game);
                                 let folder = destination.clone().expect("build enabled with a destination");
@@ -88,7 +103,11 @@ impl PackageDialog {
                 if let Some(job) = running {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Building custom packages…");
+                        ui.label(if *previous_project {
+                            "Building packages for the previous project…"
+                        } else {
+                            "Building custom packages…"
+                        });
                         if ui.button("Cancel build").clicked() {
                             job.cancel();
                         }
@@ -98,7 +117,11 @@ impl PackageDialog {
                     ui.separator();
                     match result {
                         Ok(package) => {
-                            ui.strong("Packages saved");
+                            ui.strong(if *previous_project {
+                                "Previous project packages saved"
+                            } else {
+                                "Packages saved"
+                            });
                             ui.add(egui::Label::new(package.path.display().to_string()).selectable(true));
                             egui::ScrollArea::vertical().max_height(200.).show(ui, |ui| {
                                 for notice in &package.notices {

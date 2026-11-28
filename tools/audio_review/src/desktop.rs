@@ -15,6 +15,7 @@ use crate::{
     load,
     package_ui::PackageDialog,
     player::{Action, Player},
+    project_ui::{ProjectAction, ProjectUi},
     review::{Review, Tags, View, kind_label},
 };
 
@@ -33,6 +34,7 @@ pub struct Desktop {
     selection: Selection,
     category_editor: CategoryEditor,
     package_dialog: PackageDialog,
+    project: ProjectUi,
     warning: String,
     status: Option<(String, bool)>,
 }
@@ -88,6 +90,7 @@ impl Desktop {
             selection: Selection::default(),
             category_editor: CategoryEditor::default(),
             package_dialog: PackageDialog::default(),
+            project: ProjectUi::default(),
             warning: String::new(),
             status: None,
         }
@@ -153,6 +156,7 @@ impl Desktop {
         };
         let review = &library.review;
         let mut export = false;
+        let mut project_action = None;
         ui.horizontal(|ui| {
             ui.heading("Misophonia Audio Review");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -216,6 +220,9 @@ impl Desktop {
                         );
                     }
                 });
+            ui.separator();
+            project_action = ProjectUi::menu(ui);
+            ProjectUi::label(ui, review);
         });
         if previous != self.filters {
             self.refresh();
@@ -223,6 +230,31 @@ impl Desktop {
         }
         if export {
             self.export(frame);
+        }
+        if let Some(action) = project_action {
+            self.project_action(action, frame);
+        }
+    }
+
+    fn project_action(&mut self, action: ProjectAction, frame: &eframe::Frame) {
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        match self.project.perform(action, frame, &mut library.review) {
+            Ok(Some(outcome)) => {
+                if outcome.switched {
+                    self.filters = Filters::default();
+                    self.selection = Selection::default();
+                    self.player.stop();
+                    self.category_editor = CategoryEditor::default();
+                    self.package_dialog.project_changed();
+                    self.refresh();
+                    self.select_first_if_empty();
+                }
+                self.report(Ok(outcome.message));
+            }
+            Ok(None) => (),
+            Err(error) => self.report(Err(error)),
         }
     }
 
@@ -575,6 +607,13 @@ impl Desktop {
 impl eframe::App for Desktop {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.poll();
+        if let Some(library) = &mut self.library {
+            match self.project.autosave(ctx, &mut library.review) {
+                Ok(Some(path)) => self.report(Ok(format!("Autosaved {}.", path.display()))),
+                Ok(None) => (),
+                Err(error) => self.report(Err(error)),
+            }
+        }
         egui::TopBottomPanel::top("header").show(ctx, |ui| self.header(ui, frame));
         egui::TopBottomPanel::bottom("transport").show(ctx, |ui| {
             self.transport(ui, ctx);
@@ -652,6 +691,11 @@ impl eframe::App for Desktop {
         }
         if let Some(library) = &self.library {
             self.package_dialog.show(ctx, frame, library);
+        }
+        if let Some(library) = &mut self.library
+            && let Some(message) = self.project.show_settings(ctx, &mut library.review)
+        {
+            self.report(Ok(message));
         }
     }
 }
