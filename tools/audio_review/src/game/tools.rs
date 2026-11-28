@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use libloading::Library;
 
-pub(super) fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
+pub(crate) fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
     ensure!(
         !cancelled.load(Ordering::Relaxed),
         "Audio operation canceled."
@@ -37,7 +37,7 @@ pub(super) fn executable(argument: Option<&Path>, name: &str) -> Result<Option<P
     }
 }
 
-pub(super) struct ToolOutput {
+pub(crate) struct ToolOutput {
     pub status: ExitStatus,
     pub stdout: String,
     pub stderr: String,
@@ -60,7 +60,7 @@ impl ToolOutput {
     }
 }
 
-pub(super) fn run_tool(
+pub(crate) fn run_tool(
     command: &mut Command,
     work: &Path,
     cancelled: &AtomicBool,

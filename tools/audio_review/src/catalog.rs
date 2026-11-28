@@ -136,6 +136,14 @@ impl Catalog {
         })
     }
 
+    pub fn event_assignments(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.assignments.iter().flat_map(move |(event, indices)| {
+            indices
+                .iter()
+                .map(move |&index| (self.categories[index].id.as_str(), event.as_str()))
+        })
+    }
+
     fn coverage(&self, events: &[String]) -> Vec<Coverage> {
         let mut grouped: BTreeMap<_, Vec<String>> = BTreeMap::new();
         for event in events {

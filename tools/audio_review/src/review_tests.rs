@@ -18,13 +18,14 @@ fn setup(data: &Path) -> Result<Review> {
         media_id,
     };
     let assets = vec![
-        asset("donor", "Tone", "sfx", None),
+        asset("donor", "Tone", "sfx", Some(200)),
         asset("trigger", "Chewing", "sfx", Some(42)),
         asset("screen", "TV clip", "sound", Some(10)),
     ];
     let media = MediaEvents::from([
         (42, ["cmn_generic_male_eat_chrunchy".to_owned()].into()),
         (10, [screen_event].into()),
+        (200, ["ambient_stand_in_test".to_owned()].into()),
     ]);
     Review::open(catalog, assets, &media, data)
 }
@@ -270,5 +271,70 @@ fn coverage_removal_candidates_persist_separately_from_trigger_tags() -> Result<
             .get("remove_coverage")
             .is_none()
     );
+    Ok(())
+}
+
+#[test]
+fn category_edits_keep_ids_and_update_the_build_plan() -> Result<()> {
+    use crate::build_plan::BuildPlan;
+    let dir = tempfile::tempdir()?;
+    let mut review = setup(dir.path())?;
+    let category = review.add_category("Kitchen", "Sounds")?;
+    assert!(review.add_category("kitchen", "sounds").is_err());
+    review.rename_section("Kitchen", "Personal")?;
+    review.edit_category(&category, "Personal", "Swaps")?;
+    review.save_many(vec![
+        ("donor".into(), donor(&category)),
+        ("trigger".into(), candidate(&category, Some("donor"))),
+    ])?;
+    let mut review = setup(dir.path())?;
+    assert_eq!(review.category(&category).unwrap().name, "Swaps");
+    assert_eq!(review.category(&category).unwrap().section, "Personal");
+    let plan = BuildPlan::from_review(&review)?;
+    let custom = plan
+        .categories
+        .iter()
+        .find(|entry| entry.id == category)
+        .unwrap();
+    assert_eq!(
+        custom.events["cmn_generic_male_eat_chrunchy"].as_deref(),
+        Some("donor")
+    );
+    assert_eq!(
+        plan.stand_ins["donor"].event.as_deref(),
+        Some("ambient_stand_in_test")
+    );
+
+    review.remove_section("Personal")?;
+    assert!(review.category(&category).is_none());
+    assert!(review.tags("trigger").candidate);
+    assert_eq!(review.tags("trigger").replacement, None);
+    assert_eq!(review.tags("trigger").category, None);
+    assert_eq!(review.tags("donor").stand_in_category, None);
+    review.save("trigger", Tags::default())?;
+    review.remove_category("screenPercent")?;
+    assert!(
+        !BuildPlan::from_review(&review)?
+            .categories
+            .iter()
+            .any(|entry| entry.screens)
+    );
+    Ok(())
+}
+
+#[test]
+fn bulk_conflict_rolls_back_every_edit() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut first = setup(dir.path())?;
+    let mut second = setup(dir.path())?;
+    first.save("screen", donor("screenPercent"))?;
+    let edits = vec![
+        ("donor".into(), candidate("food", None)),
+        ("screen".into(), candidate("screenPercent", None)),
+    ];
+    assert!(second.save_many(edits).is_err());
+    let review = setup(dir.path())?;
+    assert_eq!(review.tags("donor"), &Tags::default());
+    assert_eq!(review.tags("screen"), &donor("screenPercent"));
     Ok(())
 }

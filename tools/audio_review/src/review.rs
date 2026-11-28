@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::{BufWriter, Write},
     path::Path,
@@ -11,8 +11,9 @@ use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::Serialize;
 
 use crate::{
-    catalog::{Catalog, MediaEvents, Sound},
+    catalog::{Catalog, Category, MediaEvents, Sound},
     game::Asset,
+    review_categories::{self, CategoryEdit, CategoryEdits},
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -111,6 +112,9 @@ impl Store {
                 id TEXT PRIMARY KEY, candidate INTEGER NOT NULL, category TEXT,
                 stand_in INTEGER NOT NULL, stand_in_category TEXT, replacement TEXT,
                 remove_coverage INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS category_edits (
+                id TEXT PRIMARY KEY, section TEXT NOT NULL, name TEXT NOT NULL, removed INTEGER NOT NULL
              );",
         )?;
         let has_removal_flag = schema.query_row(
@@ -135,53 +139,120 @@ impl Store {
         Ok(entries.collect::<rusqlite::Result<_>>()?)
     }
 
-    fn save(&mut self, id: &str, expected: &Tags, tags: &Tags) -> Result<usize> {
+    fn categories(db: &Connection) -> Result<CategoryEdits> {
+        let mut stmt = db.prepare("SELECT id, section, name, removed FROM category_edits")?;
+        let entries = stmt.query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                CategoryEdit {
+                    section: row.get(1)?,
+                    name: row.get(2)?,
+                    removed: row.get(3)?,
+                },
+            ))
+        })?;
+        Ok(entries.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn edit_categories(&mut self, expected: &CategoryEdits, edits: &CategoryEdits) -> Result<()> {
         let db = self
             .0
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = db.query_row(
-            "SELECT candidate, category, stand_in, stand_in_category, replacement, remove_coverage FROM tags WHERE id = ?",
-            [id], |row| read_tags(row, 0),
-        ).optional()?.unwrap_or_default();
         ensure!(
-            &current == expected,
-            "This sound changed in another window. Review the refreshed tags and try again"
+            &Self::categories(&db)? == expected,
+            "Categories changed in another window. Review the refreshed categories and try again"
         );
-        if let Some(replacement) = &tags.replacement {
-            let donor: Option<(bool, Option<String>)> = db
-                .query_row(
-                    "SELECT stand_in, stand_in_category FROM tags WHERE id = ?",
-                    [replacement],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            ensure!(
-                donor.is_some_and(|(enabled, category)| enabled && category == tags.category),
-                "Choose a stand-in from the same category"
-            );
-        }
-        if tags.candidate || tags.stand_in || tags.remove_coverage {
+        for (id, edit) in edits {
             db.execute(
-                "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET candidate = excluded.candidate,
-                    category = excluded.category, stand_in = excluded.stand_in,
-                    stand_in_category = excluded.stand_in_category, replacement = excluded.replacement,
-                    remove_coverage = excluded.remove_coverage",
-                params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement, tags.remove_coverage],
+                "INSERT INTO category_edits (id, section, name, removed) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET section = excluded.section, name = excluded.name, removed = excluded.removed",
+                params![id, edit.section, edit.name, edit.removed],
             )?;
-        } else {
-            db.execute("DELETE FROM tags WHERE id = ?", [id])?;
+            if edit.removed {
+                db.execute(
+                    "UPDATE tags SET replacement = NULL
+                     WHERE replacement IN (SELECT id FROM tags WHERE stand_in_category = ?)",
+                    [id],
+                )?;
+                db.execute(
+                    "UPDATE tags SET category = NULL, replacement = NULL WHERE category = ?",
+                    [id],
+                )?;
+                db.execute(
+                    "UPDATE tags SET stand_in_category = NULL WHERE stand_in_category = ?",
+                    [id],
+                )?;
+            }
         }
-        let donor_category = if tags.stand_in {
-            tags.stand_in_category.as_deref()
-        } else {
-            None
-        };
-        let reset = db.execute(
-            "UPDATE tags SET replacement = NULL WHERE replacement = ? AND (? IS NULL OR category IS NOT ?)",
-            params![id, donor_category, donor_category],
-        )?;
+        db.commit()?;
+        Ok(())
+    }
+
+    fn save_many(
+        &mut self,
+        categories: &CategoryEdits,
+        edits: &[(&str, &Tags, &Tags)],
+    ) -> Result<usize> {
+        let db = self
+            .0
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        ensure!(
+            &Self::categories(&db)? == categories,
+            "Categories changed in another window. Review the refreshed categories and try again"
+        );
+        for (id, expected, tags) in edits {
+            let current = db.query_row(
+                "SELECT candidate, category, stand_in, stand_in_category, replacement, remove_coverage FROM tags WHERE id = ?",
+                [id], |row| read_tags(row, 0),
+            ).optional()?.unwrap_or_default();
+            ensure!(
+                &current == *expected,
+                "A selected sound changed in another window. Review the refreshed tags and try again"
+            );
+            if tags.candidate || tags.stand_in || tags.remove_coverage {
+                db.execute(
+                    "INSERT INTO tags (id, candidate, category, stand_in, stand_in_category, replacement, remove_coverage)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(id) DO UPDATE SET candidate = excluded.candidate,
+                        category = excluded.category, stand_in = excluded.stand_in,
+                        stand_in_category = excluded.stand_in_category, replacement = excluded.replacement,
+                        remove_coverage = excluded.remove_coverage",
+                    params![id, tags.candidate, tags.category, tags.stand_in, tags.stand_in_category, tags.replacement, tags.remove_coverage],
+                )?;
+            } else {
+                db.execute("DELETE FROM tags WHERE id = ?", [id])?;
+            }
+        }
+        for (_, expected, tags) in edits {
+            if tags.replacement == expected.replacement && tags.category == expected.category {
+                continue;
+            }
+            if let Some(replacement) = &tags.replacement {
+                let donor: Option<(bool, Option<String>)> = db
+                    .query_row(
+                        "SELECT stand_in, stand_in_category FROM tags WHERE id = ?",
+                        [replacement],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                ensure!(
+                    donor.is_some_and(|(enabled, category)| enabled && category == tags.category),
+                    "Choose a stand-in from the same category"
+                );
+            }
+        }
+        let mut reset = 0;
+        for (id, _, tags) in edits {
+            let donor_category = if tags.stand_in {
+                tags.stand_in_category.as_deref()
+            } else {
+                None
+            };
+            reset += db.execute(
+                "UPDATE tags SET replacement = NULL WHERE replacement = ? AND (? IS NULL OR category IS NOT ?)",
+                params![id, donor_category, donor_category],
+            )?;
+        }
         db.commit()?;
         Ok(reset)
     }
@@ -193,6 +264,9 @@ fn normalized(value: &str) -> String {
 
 pub struct Review {
     pub catalog: Catalog,
+    pub categories: Vec<Category>,
+    category_edits: CategoryEdits,
+    pub(crate) media_events: MediaEvents,
     pub sounds: Vec<Sound>,
     pub kinds: Vec<String>,
     pub audio_count: usize,
@@ -257,8 +331,14 @@ impl Review {
         fs::create_dir_all(data).with_context(|| format!("Create {}", data.display()))?;
         let store = Store::open(&data.join("review.sqlite3"))?;
         let tags = store.entries()?;
+        let category_edits = Store::categories(&store.0)?;
+        let categories = review_categories::effective(&catalog.categories, &category_edits);
+        review_categories::validate(&categories)?;
         Ok(Self {
             catalog,
+            categories,
+            category_edits,
+            media_events: media.clone(),
             sounds,
             kinds,
             audio_count,
@@ -330,6 +410,23 @@ impl Review {
     }
 
     pub fn save(&mut self, id: &str, tags: Tags) -> Result<usize> {
+        self.save_many(vec![(id.to_owned(), tags)])
+    }
+
+    pub fn save_many(&mut self, edits: Vec<(String, Tags)>) -> Result<usize> {
+        let mut ids = BTreeSet::new();
+        let mut rows = Vec::with_capacity(edits.len());
+        for (id, tags) in &edits {
+            ensure!(ids.insert(id), "The same sound was selected more than once");
+            self.validate_tags(id, tags)?;
+            rows.push((id.as_str(), self.tags.get(id).unwrap_or(&EMPTY_TAGS), tags));
+        }
+        let result = self.store.save_many(&self.category_edits, &rows);
+        self.refresh_saved_review()?;
+        result
+    }
+
+    fn validate_tags(&self, id: &str, tags: &Tags) -> Result<()> {
         let index = self
             .index(id)
             .context("The selected sound is unavailable")?;
@@ -339,12 +436,7 @@ impl Review {
         ] {
             if let Some(key) = value {
                 ensure!(
-                    enabled
-                        && self
-                            .catalog
-                            .categories
-                            .iter()
-                            .any(|category| &category.id == key),
+                    enabled && self.categories.iter().any(|category| &category.id == key),
                     "Choose a valid category for the active tag"
                 );
             }
@@ -371,9 +463,110 @@ impl Review {
                 || !self.sounds[index].coverage.is_empty(),
             "Only sounds with mod coverage can be marked for removal"
         );
-        let result = self.store.save(id, expected, &tags);
-        self.tags = self.store.entries()?;
+        Ok(())
+    }
+
+    pub fn add_category(&mut self, section: &str, name: &str) -> Result<String> {
+        let id = (1..)
+            .map(|next| format!("custom_{next}"))
+            .find(|id| {
+                !self.category_edits.contains_key(id)
+                    && !self
+                        .catalog
+                        .categories
+                        .iter()
+                        .any(|category| &category.id == id)
+            })
+            .context("Could not allocate a category identifier")?;
+        self.apply_category_edits(BTreeMap::from([(
+            id.clone(),
+            CategoryEdit::assign(section, name)?,
+        )]))?;
+        Ok(id)
+    }
+
+    pub fn edit_category(&mut self, id: &str, section: &str, name: &str) -> Result<()> {
+        self.category(id)
+            .context("This subcategory no longer exists")?;
+        self.apply_category_edits(BTreeMap::from([(
+            id.to_owned(),
+            CategoryEdit::assign(section, name)?,
+        )]))
+    }
+
+    pub fn rename_section(&mut self, section: &str, name: &str) -> Result<()> {
+        let name = review_categories::label(name)?;
+        let edits = self
+            .categories
+            .iter()
+            .filter(|category| category.section == section)
+            .map(|category| {
+                (
+                    category.id.clone(),
+                    CategoryEdit {
+                        section: name.clone(),
+                        name: category.name.clone(),
+                        removed: false,
+                    },
+                )
+            })
+            .collect();
+        self.apply_category_edits(edits)
+    }
+
+    pub fn remove_section(&mut self, name: &str) -> Result<()> {
+        let edits = self
+            .categories
+            .iter()
+            .filter(|category| category.section == name)
+            .map(|category| (category.id.clone(), CategoryEdit::remove(category)))
+            .collect();
+        self.apply_category_edits(edits)
+    }
+
+    pub fn remove_category(&mut self, id: &str) -> Result<()> {
+        let category = self
+            .category(id)
+            .context("This subcategory no longer exists")?;
+        self.apply_category_edits(BTreeMap::from([(
+            id.to_owned(),
+            CategoryEdit::remove(category),
+        )]))
+    }
+
+    pub fn category(&self, id: &str) -> Option<&Category> {
+        self.categories.iter().find(|category| category.id == id)
+    }
+
+    fn apply_category_edits(&mut self, changes: CategoryEdits) -> Result<()> {
+        let mut proposed = self.category_edits.clone();
+        proposed.extend(changes.clone());
+        let categories = review_categories::effective(&self.catalog.categories, &proposed);
+        review_categories::validate(&categories)?;
+        let result = self.store.edit_categories(&self.category_edits, &changes);
+        self.refresh_saved_review()?;
         result
+    }
+
+    fn refresh_saved_review(&mut self) -> Result<()> {
+        let edits = Store::categories(&self.store.0)?;
+        if self.category_edits != edits {
+            self.categories = review_categories::effective(&self.catalog.categories, &edits);
+            self.category_edits = edits;
+        }
+        self.tags = self.store.entries()?;
+        Ok(())
+    }
+
+    pub(crate) fn saved_tags(&self) -> Result<BTreeMap<String, Tags>> {
+        let snapshot = self.store.0.unchecked_transaction()?;
+        ensure!(
+            Store::categories(&snapshot)? == self.category_edits,
+            "Categories changed in another window. Reopen Audio Review to load them"
+        );
+        let tags = self.store.entries()?;
+        snapshot.commit()?;
+        Ok(tags)
     }
 
     fn export(&self) -> Result<serde_json::Value> {
@@ -393,7 +586,7 @@ impl Review {
         Ok(serde_json::json!({
             "schema_version": 1,
             "mod_version": self.catalog.version,
-            "categories": self.catalog.categories,
+            "categories": self.categories,
             "sounds": sounds?,
         }))
     }

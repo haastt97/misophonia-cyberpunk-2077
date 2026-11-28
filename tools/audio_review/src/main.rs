@@ -1,9 +1,11 @@
+mod build_plan;
 mod catalog;
 mod desktop;
 mod game;
 mod job;
 mod player;
 mod review;
+mod review_categories;
 
 use std::{
     env, fs,

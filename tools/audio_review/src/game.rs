@@ -1,6 +1,6 @@
 mod formats;
 mod preview;
-mod tools;
+pub(crate) mod tools;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, hash_map::Entry},
