@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sound review · Misophonia</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#sounds">Skip to sounds</a>
+  <header class="site-header">
+    <div class="shell topbar">
+      <a class="wordmark" href="/">
+        <span class="wordmark-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        Misophonia
+      </a>
+      <a class="button export" href="/api/export" download>Export review</a>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">Sound review</h1>
+        <p id="library-summary">Cyberpunk 2077</p>
+      </div>
+      <p class="legend">
+        <span><b class="legend-x" aria-hidden="true">X</b> Candidate</span>
+        <span><b class="legend-o" aria-hidden="true">O</b> Stand-in</span>
+      </p>
+    </section>
+
+    <form id="filters" class="filters" role="search">
+      <label class="search-field">Search
+        <input id="query" name="q" type="search" placeholder="Sound name or game event" autocomplete="off" spellcheck="false">
+      </label>
+      <label>Show
+        <select id="view" name="filter">
+          <option value="all">All sounds</option>
+          <option value="candidate">Candidates</option>
+          <option value="stand-in">Stand-ins</option>
+          <option value="covered">In the mod</option>
+          <option value="untagged">Untagged</option>
+        </select>
+      </label>
+      <label>Category
+        <select id="category-filter" name="category"><option value="">All categories</option></select>
+      </label>
+      <label>Sound type
+        <select id="kind-filter" name="kind"><option value="">All types</option></select>
+      </label>
+    </form>
+
+    <div class="result-bar">
+      <p id="result-count" role="status">Loading library…</p>
+      <nav id="top-pagination" class="pagination" aria-label="Page navigation">
+        <button type="button" data-page="previous" disabled aria-label="Previous page">Previous</button>
+        <button type="button" data-page="next" disabled aria-label="Next page">Next</button>
+      </nav>
+    </div>
+    <p id="notice" class="notice" role="status" hidden></p>
+    <section id="sounds" class="sounds" aria-label="Sound results" aria-busy="true" tabindex="-1"></section>
+    <nav id="bottom-pagination" class="pagination bottom-pagination" aria-label="Page navigation at end of results" hidden>
+      <button type="button" data-page="previous" disabled aria-label="Previous page">Previous</button>
+      <button type="button" data-page="next" disabled aria-label="Next page">Next</button>
+    </nav>
+  </main>
+
+  <aside id="now-playing" class="now-playing" aria-label="Audio preview" hidden>
+    <div class="shell player-layout">
+      <div class="player-name">
+        <span>Preview</span>
+        <strong id="playing-name"></strong>
+        <p id="playback-error" class="playback-error" role="status" hidden></p>
+      </div>
+      <audio id="audio" controls preload="none" aria-label="Sound preview"></audio>
+      <button id="close-player" type="button" class="close-player" aria-label="Close audio preview">×</button>
+    </div>
+  </aside>
+  <noscript>Enable JavaScript to use Sound review.</noscript>
+</body>
+</html>
