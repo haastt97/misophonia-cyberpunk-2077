@@ -119,7 +119,7 @@ impl ProjectUi {
                     else {
                         return Ok(None);
                     };
-                    Some(project_save_path(path)?)
+                    Some(path)
                 } else {
                     None
                 };
@@ -235,27 +235,6 @@ fn project_file_name(path: &Path) -> String {
         .into_owned()
 }
 
-fn project_save_path(path: PathBuf) -> Result<PathBuf> {
-    if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
-    {
-        return Ok(path);
-    }
-    let mut file_name = path
-        .file_name()
-        .context("Choose a project filename")?
-        .to_os_string();
-    file_name.push(".misophonia.json");
-    let result = path.with_file_name(file_name);
-    ensure!(
-        !result.try_exists()?,
-        "{} already exists. Select that filename directly to replace it",
-        result.display()
-    );
-    Ok(result)
-}
-
 fn parse_minutes(input: &str) -> Result<u32> {
     let minutes = input
         .trim()
@@ -314,17 +293,5 @@ mod tests {
         for invalid in ["", "0", "-1", "1.5", "minutes", "4294967296"] {
             assert!(parse_minutes(invalid).is_err(), "{invalid}");
         }
-    }
-
-    #[test]
-    fn adding_a_project_suffix_cannot_overwrite_a_different_file() -> Result<()> {
-        let folder = tempfile::tempdir()?;
-        let original = folder.path().join("Review");
-        let suffixed = folder.path().join("Review.misophonia.json");
-        assert_eq!(project_save_path(original.clone())?, suffixed);
-        fs::write(&suffixed, b"existing")?;
-        assert!(project_save_path(original).is_err());
-        assert_eq!(project_save_path(suffixed.clone())?, suffixed);
-        Ok(())
     }
 }
